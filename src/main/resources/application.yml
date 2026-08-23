@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: atlas-gic
+  datasource:
+    url: ${ATLAS_GIC_DATASOURCE_URL:jdbc:postgresql://localhost:5432/atlas_gic}
+    username: ${ATLAS_GIC_DATASOURCE_USERNAME:atlas_gic}
+    password: ${ATLAS_GIC_DATASOURCE_PASSWORD:atlas_gic}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  level:
+    root: INFO
+    com.atlas.gic: INFO
+
+atlas:
+  gic:
+    tenancy:
+      tenant-header: X-Tenant-Id
+      platform-access-header: X-Platform-Access
