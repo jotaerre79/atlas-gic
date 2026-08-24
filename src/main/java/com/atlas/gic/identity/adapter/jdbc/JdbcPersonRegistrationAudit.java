@@ -6,6 +6,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.sql.Timestamp;
+
 @Component
 @ConditionalOnBean(JdbcTemplate.class)
 public class JdbcPersonRegistrationAudit implements PersonRegistrationAudit {
@@ -29,6 +31,6 @@ public class JdbcPersonRegistrationAudit implements PersonRegistrationAudit {
                 PersonRegisteredAuditEntry.ACTION,
                 entry.personId().value(),
                 entry.correlationId(),
-                entry.timestamp());
+                Timestamp.from(entry.timestamp()));
     }
 }
