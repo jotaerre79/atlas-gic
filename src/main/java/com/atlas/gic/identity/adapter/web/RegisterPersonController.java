@@ -50,7 +50,6 @@ public class RegisterPersonController {
             @NotBlank String givenName,
             String middleName,
             @NotBlank String familyName,
-            String tenantId,
             @Valid @NotNull IdentifierRequest identifier) {
     }
 

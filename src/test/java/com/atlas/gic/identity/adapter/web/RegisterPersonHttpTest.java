@@ -66,14 +66,13 @@ class RegisterPersonHttpTest {
                                 {
                                   "givenName": "Juan",
                                   "familyName": "Perez",
-                                  "tenantId": "%s",
                                   "identifier": {
                                     "type": "CI",
                                     "value": "1234567",
                                     "issuer": "PY"
                                   }
                                 }
-                                """.formatted(TENANT_B)))
+                                """))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", org.hamcrest.Matchers.startsWith("/api/v1/persons/")))
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
