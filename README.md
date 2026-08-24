@@ -47,6 +47,10 @@ La estrategia inicial aceptada por arquitectura es PostgreSQL shared schema con 
 
 RLS debe negar acceso cuando no exista tenant context valido. El acceso de plataforma debe ser explicito y auditable; no se debe desactivar RLS globalmente para administracion.
 
+El acceso de plataforma nunca se deriva de headers controlados por el cliente. Los privilegios administrativos deben provenir de un principal autenticado y autorizado mediante IAM/Spring Security. En esta foundation, la authority explicita es `ATLAS_PLATFORM_ADMIN`.
+
+El header temporal `X-Tenant-Id` solo selecciona el tenant solicitado mientras no exista el proveedor IAM definitivo. No constituye autoridad de autorizacion: el tenant solicitado se acepta solo si el principal autenticado tiene una authority `TENANT_<tenantId>`. Si no hay tenant context autorizado, las operaciones tenant-scoped quedan en deny-by-default y RLS actua como defensa en profundidad.
+
 ## Referencias de arquitectura
 
 - `atlas-architecture/docs/03-adrs/ADR-015-gic-identidad-de-negocio-tenant-scoped.md`

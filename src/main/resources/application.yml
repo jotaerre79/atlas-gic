@@ -28,4 +28,3 @@ atlas:
   gic:
     tenancy:
       tenant-header: X-Tenant-Id
-      platform-access-header: X-Platform-Access

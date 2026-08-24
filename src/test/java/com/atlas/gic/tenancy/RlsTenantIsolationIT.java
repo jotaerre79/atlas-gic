@@ -21,6 +21,8 @@ class RlsTenantIsolationIT {
 
     private static UUID tenantA;
     private static UUID tenantB;
+    private static final String APP_USER = "atlas_gic_app";
+    private static final String APP_PASSWORD = "atlas_gic_app_password";
 
     @BeforeAll
     static void migrateAndSeed() throws Exception {
@@ -35,6 +37,9 @@ class RlsTenantIsolationIT {
 
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.createStatement()) {
+            statement.execute("CREATE ROLE %s LOGIN PASSWORD '%s'".formatted(APP_USER, APP_PASSWORD));
+            statement.execute("GRANT USAGE ON SCHEMA gic TO %s".formatted(APP_USER));
+            statement.execute("GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA gic TO %s".formatted(APP_USER));
             statement.executeUpdate("""
                     INSERT INTO gic.tenants (tenant_id, code, display_name)
                     VALUES ('%s', 'tenant-a', 'Tenant A'), ('%s', 'tenant-b', 'Tenant B')
@@ -50,7 +55,7 @@ class RlsTenantIsolationIT {
 
     @Test
     void tenantCannotReadAnotherTenantRows() throws Exception {
-        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), APP_USER, APP_PASSWORD);
              var statement = connection.createStatement()) {
             statement.execute("SET atlas.current_tenant = '%s'".formatted(tenantA));
 
@@ -64,7 +69,7 @@ class RlsTenantIsolationIT {
 
     @Test
     void missingTenantContextDeniesTenantScopedWrites() throws Exception {
-        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), APP_USER, APP_PASSWORD);
              var statement = connection.createStatement()) {
             assertThatThrownBy(() -> statement.executeUpdate("""
                     INSERT INTO gic.tenant_isolation_probe (tenant_id, label)
@@ -75,8 +80,22 @@ class RlsTenantIsolationIT {
     }
 
     @Test
+    void tenantCannotWriteAnotherTenantRows() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), APP_USER, APP_PASSWORD);
+             var statement = connection.createStatement()) {
+            statement.execute("SET atlas.current_tenant = '%s'".formatted(tenantA));
+
+            assertThatThrownBy(() -> statement.executeUpdate("""
+                    INSERT INTO gic.tenant_isolation_probe (tenant_id, label)
+                    VALUES ('%s', 'cross tenant write')
+                    """.formatted(tenantB)))
+                    .hasMessageContaining("violates row-level security policy");
+        }
+    }
+
+    @Test
     void platformAccessIsExplicitAndAuditable() throws Exception {
-        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), APP_USER, APP_PASSWORD);
              var statement = connection.createStatement()) {
             statement.execute("SET atlas.platform_access = 'true'");
             statement.executeUpdate("""
