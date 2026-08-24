@@ -9,8 +9,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import com.atlas.gic.shared.security.application.PlatformAccessAuthorization;
+import com.atlas.gic.shared.security.application.TenantAccessAuthorization;
 
 import java.io.IOException;
 
@@ -19,34 +23,50 @@ import java.io.IOException;
 public class TenantContextFilter extends OncePerRequestFilter {
 
     private final TenancyProperties properties;
+    private final PlatformAccessAuthorization platformAccessAuthorization;
+    private final TenantAccessAuthorization tenantAccessAuthorization;
 
-    public TenantContextFilter(TenancyProperties properties) {
+    public TenantContextFilter(
+            TenancyProperties properties,
+            PlatformAccessAuthorization platformAccessAuthorization,
+            TenantAccessAuthorization tenantAccessAuthorization) {
         this.properties = properties;
+        this.platformAccessAuthorization = platformAccessAuthorization;
+        this.tenantAccessAuthorization = tenantAccessAuthorization;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         var tenantHeader = request.getHeader(properties.tenantHeader());
-        var platformHeader = request.getHeader(properties.platformAccessHeader());
-        var platformAccess = "true".equalsIgnoreCase(platformHeader);
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        var platformAccess = platformAccessAuthorization.hasPlatformAccess(authentication);
 
-        try (var ignored = TenantContextHolder.open(snapshot(tenantHeader, platformAccess))) {
+        try (var ignored = TenantContextHolder.open(snapshot(tenantHeader, platformAccess, authentication))) {
             filterChain.doFilter(request, response);
         }
     }
 
-    private TenantContextSnapshot snapshot(String tenantHeader, boolean platformAccess) {
+    private TenantContextSnapshot snapshot(String tenantHeader, boolean platformAccess, Authentication authentication) {
         if (platformAccess) {
             return TenantContextSnapshot.platform();
         }
         if (tenantHeader == null || tenantHeader.isBlank()) {
             return new TenantContextSnapshot(null, false);
         }
-        return TenantContextSnapshot.tenant(TenantId.parse(tenantHeader));
+        TenantId tenantId;
+        try {
+            tenantId = TenantId.parse(tenantHeader);
+        } catch (IllegalArgumentException ignored) {
+            return new TenantContextSnapshot(null, false);
+        }
+        if (!tenantAccessAuthorization.hasTenantAccess(authentication, tenantId)) {
+            return new TenantContextSnapshot(null, false);
+        }
+        return TenantContextSnapshot.tenant(tenantId);
     }
 
     @ConfigurationProperties("atlas.gic.tenancy")
-    public record TenancyProperties(String tenantHeader, String platformAccessHeader) {
+    public record TenancyProperties(String tenantHeader) {
     }
 }
