@@ -2,6 +2,10 @@ package com.atlas.gic.security;
 
 import com.atlas.gic.shared.audit.application.PlatformAccessAudit;
 import com.atlas.gic.shared.audit.application.PlatformAccessAuditEntry;
+import com.atlas.gic.identity.application.PersonRegisteredAuditEntry;
+import com.atlas.gic.identity.application.PersonRegistrationAudit;
+import com.atlas.gic.identity.application.PersonRepository;
+import com.atlas.gic.identity.domain.Person;
 import com.atlas.gic.shared.tenancy.application.TenantContextHolder;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -28,7 +32,10 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+        "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
+                + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"
+})
 @AutoConfigureMockMvc
 class PlatformAccessContextTest {
 
@@ -117,6 +124,18 @@ class PlatformAccessContextTest {
         @Primary
         RecordingPlatformAccessAudit recordingPlatformAccessAudit() {
             return new RecordingPlatformAccessAudit();
+        }
+
+        @Bean
+        PersonRepository personRepository() {
+            return person -> {
+            };
+        }
+
+        @Bean
+        PersonRegistrationAudit personRegistrationAudit() {
+            return entry -> {
+            };
         }
 
         @RestController

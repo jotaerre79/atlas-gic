@@ -1,0 +1,213 @@
+package com.atlas.gic.identity.adapter.web;
+
+import com.atlas.gic.identity.application.DuplicatePersonIdentifierException;
+import com.atlas.gic.identity.application.PersonRegisteredAuditEntry;
+import com.atlas.gic.identity.application.PersonRegistrationAudit;
+import com.atlas.gic.identity.application.PersonRepository;
+import com.atlas.gic.identity.domain.Person;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest(properties = {
+        "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
+                + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"
+})
+@AutoConfigureMockMvc
+class RegisterPersonHttpTest {
+
+    private static final String TENANT_A = "11111111-1111-1111-1111-111111111111";
+    private static final String TENANT_B = "22222222-2222-2222-2222-222222222222";
+
+    private final MockMvc mockMvc;
+    private final RecordingPersonRepository repository;
+    private final RecordingPersonRegistrationAudit audit;
+
+    @Autowired
+    RegisterPersonHttpTest(MockMvc mockMvc, RecordingPersonRepository repository, RecordingPersonRegistrationAudit audit) {
+        this.mockMvc = mockMvc;
+        this.repository = repository;
+        this.audit = audit;
+    }
+
+    @BeforeEach
+    void reset() {
+        repository.clear();
+        audit.clear();
+    }
+
+    @Test
+    void returnsCreatedForValidRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/persons")
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .header("X-Correlation-Id", "corr-http")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "givenName": "Juan",
+                                  "familyName": "Perez",
+                                  "tenantId": "%s",
+                                  "identifier": {
+                                    "type": "CI",
+                                    "value": "1234567",
+                                    "issuer": "PY"
+                                  }
+                                }
+                                """.formatted(TENANT_B)))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", org.hamcrest.Matchers.startsWith("/api/v1/persons/")))
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.displayName").value("Juan Perez"));
+
+        assertThat(repository.saved()).singleElement()
+                .satisfies(person -> assertThat(person.tenantId().toString()).isEqualTo(TENANT_A));
+        assertThat(audit.entries()).singleElement().satisfies(entry -> {
+            assertThat(entry.actor()).isEqualTo("tenant-user");
+            assertThat(entry.tenantId().toString()).isEqualTo(TENANT_A);
+            assertThat(entry.correlationId()).isEqualTo("corr-http");
+        });
+    }
+
+    @Test
+    void returnsBadRequestForInvalidPayload() throws Exception {
+        mockMvc.perform(post("/api/v1/persons")
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "givenName": "",
+                                  "familyName": "Perez",
+                                  "identifier": {
+                                    "type": "CI",
+                                    "value": "1234567"
+                                  }
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void returnsUnauthorizedForAnonymousRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/persons")
+                        .with(anonymous())
+                        .header("X-Tenant-Id", TENANT_A)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validPayload()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void returnsForbiddenWhenTenantIsNotAuthorized() throws Exception {
+        mockMvc.perform(post("/api/v1/persons")
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_B)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validPayload()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void returnsConflictForDuplicateIdentifier() throws Exception {
+        repository.failWithDuplicate = true;
+
+        mockMvc.perform(post("/api/v1/persons")
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validPayload()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Identifier conflict"));
+    }
+
+    private String validPayload() {
+        return """
+                {
+                  "givenName": "Juan",
+                  "familyName": "Perez",
+                  "identifier": {
+                    "type": "CI",
+                    "value": "1234567",
+                    "issuer": "PY"
+                  }
+                }
+                """;
+    }
+
+    @TestConfiguration
+    static class HttpTestConfiguration {
+
+        @Bean
+        @Primary
+        RecordingPersonRepository recordingPersonRepository() {
+            return new RecordingPersonRepository();
+        }
+
+        @Bean
+        @Primary
+        RecordingPersonRegistrationAudit recordingPersonRegistrationAudit() {
+            return new RecordingPersonRegistrationAudit();
+        }
+    }
+
+    static class RecordingPersonRepository implements PersonRepository {
+
+        private final List<Person> saved = new ArrayList<>();
+        private boolean failWithDuplicate;
+
+        @Override
+        public void save(Person person) {
+            if (failWithDuplicate) {
+                throw new DuplicatePersonIdentifierException();
+            }
+            saved.add(person);
+        }
+
+        List<Person> saved() {
+            return List.copyOf(saved);
+        }
+
+        void clear() {
+            saved.clear();
+            failWithDuplicate = false;
+        }
+    }
+
+    static class RecordingPersonRegistrationAudit implements PersonRegistrationAudit {
+
+        private final List<PersonRegisteredAuditEntry> entries = new ArrayList<>();
+
+        @Override
+        public void record(PersonRegisteredAuditEntry entry) {
+            entries.add(entry);
+        }
+
+        List<PersonRegisteredAuditEntry> entries() {
+            return List.copyOf(entries);
+        }
+
+        void clear() {
+            entries.clear();
+        }
+    }
+}
