@@ -5,6 +5,10 @@ import com.atlas.gic.identity.application.PersonSearchItem;
 import com.atlas.gic.identity.application.PersonSearchPage;
 import com.atlas.gic.identity.application.PersonView;
 import com.atlas.gic.identity.domain.PersonId;
+import com.atlas.gic.roles.application.BusinessRoleAssignedAudit;
+import com.atlas.gic.roles.application.BusinessRoleAssignmentRepository;
+import com.atlas.gic.roles.application.BusinessRoleAssignmentView;
+import com.atlas.gic.roles.domain.BusinessRoleAssignment;
 import com.atlas.gic.shared.tenancy.domain.TenantId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -187,6 +191,33 @@ class PersonRetrievalHttpTest {
         @Primary
         RegisterPersonHttpTest.RecordingPersonRegistrationAudit recordingPersonRegistrationAudit() {
             return new RegisterPersonHttpTest.RecordingPersonRegistrationAudit();
+        }
+
+        @Bean
+        @Primary
+        BusinessRoleAssignmentRepository businessRoleAssignmentRepository() {
+            return new BusinessRoleAssignmentRepository() {
+                @Override
+                public boolean personExists(TenantId tenantId, PersonId personId) {
+                    return false;
+                }
+
+                @Override
+                public void save(BusinessRoleAssignment assignment, String actor) {
+                }
+
+                @Override
+                public List<BusinessRoleAssignmentView> findByPerson(TenantId tenantId, PersonId personId) {
+                    return List.of();
+                }
+            };
+        }
+
+        @Bean
+        @Primary
+        BusinessRoleAssignedAudit businessRoleAssignedAudit() {
+            return entry -> {
+            };
         }
     }
 

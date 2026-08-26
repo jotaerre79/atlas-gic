@@ -58,11 +58,37 @@ La busqueda inicial usa paginacion `LIMIT/OFFSET`, `page >= 0`, `size` default `
 
 La respuesta expone PII minima necesaria para este slice: nombre, estado, display name e identificadores en forma reducida o enmascarada. No se devuelve auditoria, correlation IDs internos ni metadata tecnica.
 
+## Business Role Assignment v0.1
+
+Endpoints iniciales de roles de negocio acumulables sobre Persona:
+
+```text
+POST /api/v1/persons/{personId}/roles
+GET /api/v1/persons/{personId}/roles
+```
+
+Roles iniciales permitidos:
+
+- `SOCIO`
+- `CLIENTE`
+- `PROVEEDOR`
+
+Una Persona puede tener multiples roles de negocio simultaneos, pero no puede tener duplicada una asignacion `ACTIVE` del mismo rol dentro del mismo tenant. Los roles de negocio no son authorities IAM y no conceden permisos tecnicos.
+
+Persistencia inicial:
+
+- `gic.business_role_assignment`
+- `gic.business_role_assignment_audit`
+
+La tabla de asignaciones es tenant-scoped, usa FK tenant-aware hacia `gic.person`, RLS con `ENABLE` y `FORCE`, y un indice unico parcial sobre `(tenant_id, person_id, role_type)` para impedir duplicados activos. La auditoria registra `BUSINESS_ROLE_ASSIGNED` con actor, tenant, persona, asignacion, rol, correlacion y timestamp, sin duplicar PII de Persona.
+
 ## Fuera de alcance
 
 - CRUD funcional.
 - RegisterPerson completo fuera del vertical slice v0.1.
-- Roles y relaciones funcionales.
+- Permisos IAM derivados de roles de negocio.
+- Workflows complejos de roles.
+- Relaciones funcionales.
 - Merge y deduplicacion semantica compleja.
 - IAM real.
 - OpenAPI definitivo.

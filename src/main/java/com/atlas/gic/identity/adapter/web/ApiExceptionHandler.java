@@ -3,6 +3,7 @@ package com.atlas.gic.identity.adapter.web;
 import com.atlas.gic.identity.application.DuplicatePersonIdentifierException;
 import com.atlas.gic.identity.application.PersonNotFoundException;
 import com.atlas.gic.identity.application.TenantContextRequiredException;
+import com.atlas.gic.roles.application.DuplicateActiveBusinessRoleException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -38,6 +39,14 @@ public class ApiExceptionHandler {
         var problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
         problem.setTitle("Identifier conflict");
         problem.setDetail("A person with the same identifier already exists for this tenant");
+        return problem;
+    }
+
+    @ExceptionHandler(DuplicateActiveBusinessRoleException.class)
+    ProblemDetail duplicateRole(DuplicateActiveBusinessRoleException exception) {
+        var problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setTitle("Business role conflict");
+        problem.setDetail("The person already has an active assignment for this business role");
         return problem;
     }
 

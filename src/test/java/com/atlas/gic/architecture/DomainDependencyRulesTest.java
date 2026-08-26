@@ -19,4 +19,14 @@ class DomainDependencyRulesTest {
                         "javax.persistence..")
                 .check(classes);
     }
+
+    @Test
+    void businessRolesDoNotDependOnSecurityAuthorities() {
+        var classes = new ClassFileImporter().importPackages("com.atlas.gic");
+
+        noClasses()
+                .that().resideInAPackage("..roles.domain..")
+                .should().dependOnClassesThat().resideInAnyPackage("..shared.security..")
+                .check(classes);
+    }
 }
