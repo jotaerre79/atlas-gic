@@ -4,7 +4,7 @@ Foundation tecnica inicial del bounded context GIC - Gestion Integral de Identid
 
 ## Alcance
 
-Esta foundation habilita estructura tecnica, no funcionalidad completa.
+Esta foundation habilita estructura tecnica y el primer vertical slice funcional acotado.
 
 Incluye:
 
@@ -23,10 +23,33 @@ Incluye:
 - Tests unitarios, de arquitectura e integracion.
 - CI basico con GitHub Actions.
 
+## RegisterPerson v0.1
+
+Endpoint inicial:
+
+```text
+POST /api/v1/persons
+```
+
+Este slice registra una Persona en el tenant autorizado actual. El `tenantId` no se acepta desde el body como autoridad; proviene exclusivamente del tenant context ya autorizado. La respuesta exitosa es `201 Created` con `personId`, `status=ACTIVE` y `displayName`.
+
+Persistencia inicial:
+
+- `gic.person`
+- `gic.person_identifier`
+- `gic.person_audit`
+
+Las tablas tenant-scoped usan `tenant_id`, Row Level Security con `ENABLE` y `FORCE`, y politicas deny-by-default cuando no existe tenant context valido. El conflicto tecnico de identificador por tenant se modela con unicidad sobre `(tenant_id, identifier_type, normalized_identifier_value)` y se expone como HTTP `409`.
+
+La auditoria de negocio registra `PERSON_REGISTERED` con actor, tenant, persona, correlacion y timestamp. No se registran nombres ni identificadores completos en logs operativos.
+
 ## Fuera de alcance
 
-- RegisterPerson completo.
 - CRUD funcional.
+- RegisterPerson completo fuera del vertical slice v0.1.
+- Roles y relaciones funcionales.
+- Merge y deduplicacion semantica compleja.
+- IAM real.
 - OpenAPI definitivo.
 - Kafka, RabbitMQ o Redis.
 - Kubernetes.

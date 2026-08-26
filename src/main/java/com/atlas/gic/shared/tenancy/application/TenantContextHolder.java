@@ -1,9 +1,11 @@
 package com.atlas.gic.shared.tenancy.application;
 
 import com.atlas.gic.shared.tenancy.domain.TenantId;
+import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 
+@Component
 public final class TenantContextHolder implements TenantContext {
 
     private static final ThreadLocal<TenantContextSnapshot> CURRENT = new ThreadLocal<>();

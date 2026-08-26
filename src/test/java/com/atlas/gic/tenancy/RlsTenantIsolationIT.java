@@ -21,6 +21,7 @@ class RlsTenantIsolationIT {
 
     private static UUID tenantA;
     private static UUID tenantB;
+    private static UUID personB;
     private static final String APP_USER = "atlas_gic_app";
     private static final String APP_PASSWORD = "atlas_gic_app_password";
 
@@ -34,6 +35,7 @@ class RlsTenantIsolationIT {
 
         tenantA = UUID.randomUUID();
         tenantB = UUID.randomUUID();
+        personB = UUID.randomUUID();
 
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.createStatement()) {
@@ -49,6 +51,18 @@ class RlsTenantIsolationIT {
                     INSERT INTO gic.tenant_isolation_probe (tenant_id, label)
                     VALUES ('%s', 'A only'), ('%s', 'B only')
                     """.formatted(tenantA, tenantB));
+            statement.executeUpdate("""
+                    INSERT INTO gic.person (
+                        person_id, tenant_id, given_name, family_name, display_name, status
+                    )
+                    VALUES ('%s', '%s', 'Tenant', 'B', 'Tenant B', 'ACTIVE')
+                    """.formatted(personB, tenantB));
+            statement.executeUpdate("""
+                    INSERT INTO gic.person_identifier (
+                        person_id, tenant_id, identifier_type, identifier_value, normalized_identifier_value, issuer
+                    )
+                    VALUES ('%s', '%s', 'CI', 'B-123', 'B123', 'PY')
+                    """.formatted(personB, tenantB));
             statement.execute("RESET atlas.platform_access");
         }
     }
@@ -107,6 +121,75 @@ class RlsTenantIsolationIT {
                 assertThat(resultSet.next()).isTrue();
                 assertThat(resultSet.getInt(1)).isEqualTo(2);
             }
+        }
+    }
+
+    @Test
+    void tenantCanInsertAndReadOwnPerson() throws Exception {
+        var personA = UUID.randomUUID();
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), APP_USER, APP_PASSWORD);
+             var statement = connection.createStatement()) {
+            statement.execute("SET atlas.current_tenant = '%s'".formatted(tenantA));
+            statement.executeUpdate("""
+                    INSERT INTO gic.person (
+                        person_id, tenant_id, given_name, family_name, display_name, status
+                    )
+                    VALUES ('%s', '%s', 'Tenant', 'A', 'Tenant A', 'ACTIVE')
+                    """.formatted(personA, tenantA));
+            statement.executeUpdate("""
+                    INSERT INTO gic.person_identifier (
+                        person_id, tenant_id, identifier_type, identifier_value, normalized_identifier_value, issuer
+                    )
+                    VALUES ('%s', '%s', 'CI', 'A-123', 'A123', 'PY')
+                    """.formatted(personA, tenantA));
+
+            try (var resultSet = statement.executeQuery("SELECT display_name FROM gic.person WHERE person_id = '%s'".formatted(personA))) {
+                assertThat(resultSet.next()).isTrue();
+                assertThat(resultSet.getString("display_name")).isEqualTo("Tenant A");
+            }
+        }
+    }
+
+    @Test
+    void tenantCannotReadAnotherTenantPerson() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), APP_USER, APP_PASSWORD);
+             var statement = connection.createStatement()) {
+            statement.execute("SET atlas.current_tenant = '%s'".formatted(tenantA));
+
+            try (var resultSet = statement.executeQuery("SELECT count(*) FROM gic.person WHERE person_id = '%s'".formatted(personB))) {
+                assertThat(resultSet.next()).isTrue();
+                assertThat(resultSet.getInt(1)).isZero();
+            }
+        }
+    }
+
+    @Test
+    void tenantCannotUpdateAnotherTenantPerson() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), APP_USER, APP_PASSWORD);
+             var statement = connection.createStatement()) {
+            statement.execute("SET atlas.current_tenant = '%s'".formatted(tenantA));
+
+            var updated = statement.executeUpdate("""
+                    UPDATE gic.person
+                    SET family_name = 'Changed'
+                    WHERE person_id = '%s'
+                    """.formatted(personB));
+
+            assertThat(updated).isZero();
+        }
+    }
+
+    @Test
+    void missingTenantContextDeniesPersonWrites() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), APP_USER, APP_PASSWORD);
+             var statement = connection.createStatement()) {
+            assertThatThrownBy(() -> statement.executeUpdate("""
+                    INSERT INTO gic.person (
+                        person_id, tenant_id, given_name, family_name, display_name, status
+                    )
+                    VALUES ('%s', '%s', 'Missing', 'Tenant', 'Missing Tenant', 'ACTIVE')
+                    """.formatted(UUID.randomUUID(), tenantA)))
+                    .hasMessageContaining("violates row-level security policy");
         }
     }
 }
