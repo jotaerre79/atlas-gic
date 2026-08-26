@@ -71,13 +71,18 @@ class RegisterPersonPersistenceIT {
         assertThat(result).isNotNull();
         assertThat(result.displayName()).isEqualTo("Juan Perez");
 
-        jdbcTemplate.queryForObject("SELECT set_config('atlas.current_tenant', ?, false)", String.class, tenantId.toString());
-        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM gic.person", Integer.class)).isEqualTo(1);
-        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM gic.person_identifier", Integer.class)).isEqualTo(1);
-        assertThat(jdbcTemplate.queryForObject("""
-                SELECT count(*) FROM gic.person_audit
-                WHERE action = 'PERSON_REGISTERED' AND actor = 'persistence-it'
-                """, Integer.class)).isEqualTo(1);
+        transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.queryForObject(
+                    "SELECT set_config('atlas.current_tenant', ?, true)",
+                    String.class,
+                    tenantId.toString());
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM gic.person", Integer.class)).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM gic.person_identifier", Integer.class)).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT count(*) FROM gic.person_audit
+                    WHERE action = 'PERSON_REGISTERED' AND actor = 'persistence-it'
+                    """, Integer.class)).isEqualTo(1);
+        });
     }
 
     @Test
