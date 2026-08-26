@@ -65,8 +65,9 @@ class PersonRetrievalPersistenceIT {
 
     @Test
     void getPersonFindsCurrentTenantPerson() {
-        var repository = repository();
-        var result = transactionTemplate().execute(status -> repository.findById(tenantA, personA1));
+        var dataSource = appDataSource();
+        var repository = repository(dataSource);
+        var result = transactionTemplate(dataSource).execute(status -> repository.findById(tenantA, personA1));
 
         assertThat(result).isPresent();
         assertThat(result.orElseThrow().displayName()).isEqualTo("Ana Alvarez");
@@ -76,20 +77,23 @@ class PersonRetrievalPersistenceIT {
 
     @Test
     void getPersonDoesNotExposeAnotherTenantPerson() {
-        var repository = repository();
-        var result = transactionTemplate().execute(status -> repository.findById(tenantA, personB1));
+        var dataSource = appDataSource();
+        var repository = repository(dataSource);
+        var result = transactionTemplate(dataSource).execute(status -> repository.findById(tenantA, personB1));
 
         assertThat(result).isEmpty();
     }
 
     @Test
     void searchReturnsOnlyCurrentTenantPeopleWithStablePagination() {
-        var repository = repository();
+        var dataSource = appDataSource();
+        var repository = repository(dataSource);
+        var transactionTemplate = transactionTemplate(dataSource);
 
-        var firstPage = transactionTemplate().execute(status -> repository.search(tenantA, null, 0, 1));
-        var secondPage = transactionTemplate().execute(status -> repository.search(tenantA, null, 1, 1));
-        var queryPage = transactionTemplate().execute(status -> repository.search(tenantA, "bruno", 0, 20));
-        var crossTenantQuery = transactionTemplate().execute(status -> repository.search(tenantA, "carlos", 0, 20));
+        var firstPage = transactionTemplate.execute(status -> repository.search(tenantA, null, 0, 1));
+        var secondPage = transactionTemplate.execute(status -> repository.search(tenantA, null, 1, 1));
+        var queryPage = transactionTemplate.execute(status -> repository.search(tenantA, "bruno", 0, 20));
+        var crossTenantQuery = transactionTemplate.execute(status -> repository.search(tenantA, "carlos", 0, 20));
 
         assertThat(firstPage).isNotNull();
         assertThat(firstPage.total()).isEqualTo(2);
@@ -137,12 +141,12 @@ class PersonRetrievalPersistenceIT {
                 """.formatted(personId, tenantId, identifierType, identifierValue, normalizedIdentifierValue));
     }
 
-    private static JdbcPersonReadRepository repository() {
-        return new JdbcPersonReadRepository(new JdbcTemplate(appDataSource()));
+    private static JdbcPersonReadRepository repository(DriverManagerDataSource dataSource) {
+        return new JdbcPersonReadRepository(new JdbcTemplate(dataSource));
     }
 
-    private static TransactionTemplate transactionTemplate() {
-        return new TransactionTemplate(new DataSourceTransactionManager(appDataSource()));
+    private static TransactionTemplate transactionTemplate(DriverManagerDataSource dataSource) {
+        return new TransactionTemplate(new DataSourceTransactionManager(dataSource));
     }
 
     private static DriverManagerDataSource appDataSource() {
