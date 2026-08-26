@@ -43,6 +43,21 @@ Las tablas tenant-scoped usan `tenant_id`, Row Level Security con `ENABLE` y `FO
 
 La auditoria de negocio registra `PERSON_REGISTERED` con actor, tenant, persona, correlacion y timestamp. No se registran nombres ni identificadores completos en logs operativos.
 
+## Person Retrieval v0.1
+
+Endpoints de lectura basica:
+
+```text
+GET /api/v1/persons/{personId}
+GET /api/v1/persons?query=<text>&page=0&size=20
+```
+
+Las lecturas operan exclusivamente dentro del tenant autorizado actual. El `personId` por si solo no autoriza acceso y una persona de otro tenant se trata como no encontrada para no filtrar existencia cross-tenant.
+
+La busqueda inicial usa paginacion `LIMIT/OFFSET`, `page >= 0`, `size` default `20`, `size` maximo `100` y orden estable por `displayName` y `personId`. No hay sorting arbitrario ni busqueda cross-tenant.
+
+La respuesta expone PII minima necesaria para este slice: nombre, estado, display name e identificadores en forma reducida o enmascarada. No se devuelve auditoria, correlation IDs internos ni metadata tecnica.
+
 ## Fuera de alcance
 
 - CRUD funcional.

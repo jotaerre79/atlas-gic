@@ -2,9 +2,11 @@ package com.atlas.gic.security;
 
 import com.atlas.gic.shared.audit.application.PlatformAccessAudit;
 import com.atlas.gic.shared.audit.application.PlatformAccessAuditEntry;
+import com.atlas.gic.identity.application.PersonReadRepository;
 import com.atlas.gic.identity.application.PersonRegisteredAuditEntry;
 import com.atlas.gic.identity.application.PersonRegistrationAudit;
 import com.atlas.gic.identity.application.PersonRepository;
+import com.atlas.gic.identity.application.PersonSearchPage;
 import com.atlas.gic.identity.domain.Person;
 import com.atlas.gic.shared.tenancy.application.TenantContextHolder;
 import org.junit.jupiter.api.Test;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static com.atlas.gic.shared.security.application.PlatformAuthorities.PLATFORM_ADMIN;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -135,6 +138,27 @@ class PlatformAccessContextTest {
         @Bean
         PersonRegistrationAudit personRegistrationAudit() {
             return entry -> {
+            };
+        }
+
+        @Bean
+        PersonReadRepository personReadRepository() {
+            return new PersonReadRepository() {
+                @Override
+                public Optional<com.atlas.gic.identity.application.PersonView> findById(
+                        com.atlas.gic.shared.tenancy.domain.TenantId tenantId,
+                        com.atlas.gic.identity.domain.PersonId personId) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public PersonSearchPage search(
+                        com.atlas.gic.shared.tenancy.domain.TenantId tenantId,
+                        String query,
+                        int page,
+                        int size) {
+                    return new PersonSearchPage(List.of(), page, size, 0);
+                }
             };
         }
 

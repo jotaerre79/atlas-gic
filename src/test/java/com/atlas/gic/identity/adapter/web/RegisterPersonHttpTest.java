@@ -3,7 +3,9 @@ package com.atlas.gic.identity.adapter.web;
 import com.atlas.gic.identity.application.DuplicatePersonIdentifierException;
 import com.atlas.gic.identity.application.PersonRegisteredAuditEntry;
 import com.atlas.gic.identity.application.PersonRegistrationAudit;
+import com.atlas.gic.identity.application.PersonReadRepository;
 import com.atlas.gic.identity.application.PersonRepository;
+import com.atlas.gic.identity.application.PersonSearchPage;
 import com.atlas.gic.identity.domain.Person;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
@@ -166,6 +169,28 @@ class RegisterPersonHttpTest {
         @Primary
         RecordingPersonRegistrationAudit recordingPersonRegistrationAudit() {
             return new RecordingPersonRegistrationAudit();
+        }
+
+        @Bean
+        @Primary
+        PersonReadRepository personReadRepository() {
+            return new PersonReadRepository() {
+                @Override
+                public Optional<com.atlas.gic.identity.application.PersonView> findById(
+                        com.atlas.gic.shared.tenancy.domain.TenantId tenantId,
+                        com.atlas.gic.identity.domain.PersonId personId) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public PersonSearchPage search(
+                        com.atlas.gic.shared.tenancy.domain.TenantId tenantId,
+                        String query,
+                        int page,
+                        int size) {
+                    return new PersonSearchPage(List.of(), page, size, 0);
+                }
+            };
         }
     }
 
