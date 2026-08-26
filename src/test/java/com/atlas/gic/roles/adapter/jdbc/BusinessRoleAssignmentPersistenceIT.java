@@ -85,9 +85,10 @@ class BusinessRoleAssignmentPersistenceIT {
                 repository,
                 new JdbcBusinessRoleAssignedAudit(jdbcTemplate),
                 () -> "roles-it");
+        var uniquePerson = seedPerson(UUID.randomUUID(), tenantA, "Multiple", "Roles");
 
-        var socio = transactionTemplate.execute(status -> useCase.assign(command(personA, BusinessRoleType.SOCIO)));
-        var cliente = transactionTemplate.execute(status -> useCase.assign(command(personA, BusinessRoleType.CLIENTE)));
+        var socio = transactionTemplate.execute(status -> useCase.assign(command(uniquePerson, BusinessRoleType.SOCIO)));
+        var cliente = transactionTemplate.execute(status -> useCase.assign(command(uniquePerson, BusinessRoleType.CLIENTE)));
 
         assertThat(socio).isNotNull();
         assertThat(cliente).isNotNull();
@@ -102,7 +103,7 @@ class BusinessRoleAssignmentPersistenceIT {
                     WHERE person_id = ?
                     """,
                     Integer.class,
-                    personA.value())).isEqualTo(2);
+                    uniquePerson.value())).isEqualTo(2);
             assertThat(jdbcTemplate.queryForObject("""
                     SELECT count(*)
                     FROM gic.business_role_assignment_audit
