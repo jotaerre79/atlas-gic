@@ -8,7 +8,13 @@ import com.atlas.gic.identity.application.PersonRegistrationAudit;
 import com.atlas.gic.identity.application.PersonRepository;
 import com.atlas.gic.identity.application.PersonSearchPage;
 import com.atlas.gic.identity.domain.Person;
+import com.atlas.gic.identity.domain.PersonId;
+import com.atlas.gic.roles.application.BusinessRoleAssignedAudit;
+import com.atlas.gic.roles.application.BusinessRoleAssignmentRepository;
+import com.atlas.gic.roles.application.BusinessRoleAssignmentView;
+import com.atlas.gic.roles.domain.BusinessRoleAssignment;
 import com.atlas.gic.shared.tenancy.application.TenantContextHolder;
+import com.atlas.gic.shared.tenancy.domain.TenantId;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -159,6 +165,31 @@ class PlatformAccessContextTest {
                         int size) {
                     return new PersonSearchPage(List.of(), page, size, 0);
                 }
+            };
+        }
+
+        @Bean
+        BusinessRoleAssignmentRepository businessRoleAssignmentRepository() {
+            return new BusinessRoleAssignmentRepository() {
+                @Override
+                public boolean personExists(TenantId tenantId, PersonId personId) {
+                    return false;
+                }
+
+                @Override
+                public void save(BusinessRoleAssignment assignment, String actor) {
+                }
+
+                @Override
+                public List<BusinessRoleAssignmentView> findByPerson(TenantId tenantId, PersonId personId) {
+                    return List.of();
+                }
+            };
+        }
+
+        @Bean
+        BusinessRoleAssignedAudit businessRoleAssignedAudit() {
+            return entry -> {
             };
         }
 

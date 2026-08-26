@@ -7,6 +7,12 @@ import com.atlas.gic.identity.application.PersonReadRepository;
 import com.atlas.gic.identity.application.PersonRepository;
 import com.atlas.gic.identity.application.PersonSearchPage;
 import com.atlas.gic.identity.domain.Person;
+import com.atlas.gic.identity.domain.PersonId;
+import com.atlas.gic.roles.application.BusinessRoleAssignedAudit;
+import com.atlas.gic.roles.application.BusinessRoleAssignmentRepository;
+import com.atlas.gic.roles.application.BusinessRoleAssignmentView;
+import com.atlas.gic.roles.domain.BusinessRoleAssignment;
+import com.atlas.gic.shared.tenancy.domain.TenantId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -190,6 +196,33 @@ class RegisterPersonHttpTest {
                         int size) {
                     return new PersonSearchPage(List.of(), page, size, 0);
                 }
+            };
+        }
+
+        @Bean
+        @Primary
+        BusinessRoleAssignmentRepository businessRoleAssignmentRepository() {
+            return new BusinessRoleAssignmentRepository() {
+                @Override
+                public boolean personExists(TenantId tenantId, PersonId personId) {
+                    return false;
+                }
+
+                @Override
+                public void save(BusinessRoleAssignment assignment, String actor) {
+                }
+
+                @Override
+                public List<BusinessRoleAssignmentView> findByPerson(TenantId tenantId, PersonId personId) {
+                    return List.of();
+                }
+            };
+        }
+
+        @Bean
+        @Primary
+        BusinessRoleAssignedAudit businessRoleAssignedAudit() {
+            return entry -> {
             };
         }
     }
