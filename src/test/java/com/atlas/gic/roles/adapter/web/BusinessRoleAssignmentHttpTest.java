@@ -7,10 +7,14 @@ import com.atlas.gic.identity.domain.Person;
 import com.atlas.gic.identity.domain.PersonId;
 import com.atlas.gic.roles.application.BusinessRoleAssignedAudit;
 import com.atlas.gic.roles.application.BusinessRoleAssignedAuditEntry;
+import com.atlas.gic.roles.application.BusinessRoleAlreadyEndedException;
+import com.atlas.gic.roles.application.BusinessRoleEndedAudit;
+import com.atlas.gic.roles.application.BusinessRoleEndedAuditEntry;
 import com.atlas.gic.roles.application.BusinessRoleAssignmentRepository;
 import com.atlas.gic.roles.application.BusinessRoleAssignmentView;
 import com.atlas.gic.roles.application.DuplicateActiveBusinessRoleException;
 import com.atlas.gic.roles.domain.BusinessRoleAssignment;
+import com.atlas.gic.roles.domain.BusinessRoleAssignmentId;
 import com.atlas.gic.roles.domain.BusinessRoleAssignmentStatus;
 import com.atlas.gic.roles.domain.BusinessRoleType;
 import com.atlas.gic.shared.tenancy.domain.TenantId;
@@ -54,21 +58,25 @@ class BusinessRoleAssignmentHttpTest {
     private final MockMvc mockMvc;
     private final RecordingBusinessRoleAssignmentRepository repository;
     private final RecordingBusinessRoleAssignedAudit audit;
+    private final RecordingBusinessRoleEndedAudit endedAudit;
 
     @Autowired
     BusinessRoleAssignmentHttpTest(
             MockMvc mockMvc,
             RecordingBusinessRoleAssignmentRepository repository,
-            RecordingBusinessRoleAssignedAudit audit) {
+            RecordingBusinessRoleAssignedAudit audit,
+            RecordingBusinessRoleEndedAudit endedAudit) {
         this.mockMvc = mockMvc;
         this.repository = repository;
         this.audit = audit;
+        this.endedAudit = endedAudit;
     }
 
     @BeforeEach
     void reset() {
         repository.clear();
         audit.clear();
+        endedAudit.clear();
     }
 
     @Test
@@ -187,6 +195,99 @@ class BusinessRoleAssignmentHttpTest {
         assertThat(repository.lastTenant.toString()).isEqualTo(TENANT_A);
     }
 
+    @Test
+    void endsActiveRoleAssignment() throws Exception {
+        repository.personExists = true;
+        repository.assignment = Optional.of(activeAssignment());
+
+        mockMvc.perform(post("/api/v1/persons/{personId}/roles/{assignmentId}/end",
+                        PERSON_ID,
+                        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .header("X-Correlation-Id", "corr-end-http")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "validTo": "2026-08-26",
+                                  "reason": "voluntary end"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignmentId").value("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+                .andExpect(jsonPath("$.personId").value(PERSON_ID))
+                .andExpect(jsonPath("$.role").value("SOCIO"))
+                .andExpect(jsonPath("$.status").value("ENDED"))
+                .andExpect(jsonPath("$.validTo").value("2026-08-26"));
+
+        assertThat(repository.endedAssignment.status()).isEqualTo(BusinessRoleAssignmentStatus.ENDED);
+        assertThat(endedAudit.entries).singleElement()
+                .satisfies(entry -> {
+                    assertThat(entry.actor()).isEqualTo("tenant-user");
+                    assertThat(entry.correlationId()).isEqualTo("corr-end-http");
+                    assertThat(entry.reason()).isEqualTo("voluntary end");
+                });
+    }
+
+    @Test
+    void returnsBadRequestWhenEndDateIsMissingOrBeforeValidFrom() throws Exception {
+        repository.personExists = true;
+        repository.assignment = Optional.of(activeAssignment());
+
+        mockMvc.perform(post("/api/v1/persons/{personId}/roles/{assignmentId}/end",
+                        PERSON_ID,
+                        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/v1/persons/{personId}/roles/{assignmentId}/end",
+                        PERSON_ID,
+                        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "validTo": "2026-01-09"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void returnsConflictWhenEndingAlreadyEndedAssignment() throws Exception {
+        repository.personExists = true;
+        repository.assignment = Optional.of(activeAssignment().end(LocalDate.parse("2026-08-26")));
+
+        mockMvc.perform(post("/api/v1/persons/{personId}/roles/{assignmentId}/end",
+                        PERSON_ID,
+                        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(endPayload()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Business role lifecycle conflict"));
+    }
+
+    @Test
+    void returnsNotFoundWhenEndingAssignmentOutsideCurrentTenantPerson() throws Exception {
+        repository.personExists = true;
+        repository.assignment = Optional.empty();
+
+        mockMvc.perform(post("/api/v1/persons/{personId}/roles/{assignmentId}/end",
+                        PERSON_ID,
+                        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(endPayload()))
+                .andExpect(status().isNotFound());
+    }
+
     private String validPayload() {
         return """
                 {
@@ -194,6 +295,25 @@ class BusinessRoleAssignmentHttpTest {
                   "validFrom": "2026-08-26"
                 }
                 """;
+    }
+
+    private String endPayload() {
+        return """
+                {
+                  "validTo": "2026-08-26"
+                }
+                """;
+    }
+
+    private BusinessRoleAssignment activeAssignment() {
+        return new BusinessRoleAssignment(
+                BusinessRoleAssignmentId.of(UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")),
+                TenantId.of(UUID.fromString(TENANT_A)),
+                PersonId.of(UUID.fromString(PERSON_ID)),
+                BusinessRoleType.SOCIO,
+                LocalDate.parse("2026-01-10"),
+                null,
+                BusinessRoleAssignmentStatus.ACTIVE);
     }
 
     @TestConfiguration
@@ -209,6 +329,12 @@ class BusinessRoleAssignmentHttpTest {
         @Primary
         RecordingBusinessRoleAssignedAudit recordingBusinessRoleAssignedAudit() {
             return new RecordingBusinessRoleAssignedAudit();
+        }
+
+        @Bean
+        @Primary
+        RecordingBusinessRoleEndedAudit recordingBusinessRoleEndedAudit() {
+            return new RecordingBusinessRoleEndedAudit();
         }
 
         @Bean
@@ -253,6 +379,8 @@ class BusinessRoleAssignmentHttpTest {
         private boolean duplicate;
         private String lastActor;
         private TenantId lastTenant;
+        private Optional<BusinessRoleAssignment> assignment = Optional.empty();
+        private BusinessRoleAssignment endedAssignment;
         private final List<BusinessRoleAssignment> saved = new ArrayList<>();
         private final List<BusinessRoleAssignmentView> views = new ArrayList<>();
 
@@ -277,11 +405,37 @@ class BusinessRoleAssignmentHttpTest {
             return List.copyOf(views);
         }
 
+        @Override
+        public Optional<BusinessRoleAssignment> findById(
+                TenantId tenantId,
+                PersonId personId,
+                BusinessRoleAssignmentId assignmentId) {
+            lastTenant = tenantId;
+            return assignment;
+        }
+
+        @Override
+        public boolean endActive(
+                TenantId tenantId,
+                PersonId personId,
+                BusinessRoleAssignment endedAssignment,
+                String actor,
+                String reason) {
+            if (assignment.map(existing -> existing.status() == BusinessRoleAssignmentStatus.ENDED).orElse(false)) {
+                throw new BusinessRoleAlreadyEndedException();
+            }
+            this.endedAssignment = endedAssignment;
+            this.lastActor = actor;
+            return true;
+        }
+
         void clear() {
             personExists = false;
             duplicate = false;
             lastActor = null;
             lastTenant = null;
+            assignment = Optional.empty();
+            endedAssignment = null;
             saved.clear();
             views.clear();
         }
@@ -293,6 +447,20 @@ class BusinessRoleAssignmentHttpTest {
 
         @Override
         public void record(BusinessRoleAssignedAuditEntry entry) {
+            entries.add(entry);
+        }
+
+        void clear() {
+            entries.clear();
+        }
+    }
+
+    static class RecordingBusinessRoleEndedAudit implements BusinessRoleEndedAudit {
+
+        private final List<BusinessRoleEndedAuditEntry> entries = new ArrayList<>();
+
+        @Override
+        public void record(BusinessRoleEndedAuditEntry entry) {
             entries.add(entry);
         }
 

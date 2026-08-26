@@ -65,6 +65,7 @@ Endpoints iniciales de roles de negocio acumulables sobre Persona:
 ```text
 POST /api/v1/persons/{personId}/roles
 GET /api/v1/persons/{personId}/roles
+POST /api/v1/persons/{personId}/roles/{assignmentId}/end
 ```
 
 Roles iniciales permitidos:
@@ -82,12 +83,15 @@ Persistencia inicial:
 
 La tabla de asignaciones es tenant-scoped, usa FK tenant-aware hacia `gic.person`, RLS con `ENABLE` y `FORCE`, y un indice unico parcial sobre `(tenant_id, person_id, role_type)` para impedir duplicados activos. La auditoria registra `BUSINESS_ROLE_ASSIGNED` con actor, tenant, persona, asignacion, rol, correlacion y timestamp, sin duplicar PII de Persona.
 
+El lifecycle minimo permite solamente la transicion `ACTIVE -> ENDED`. Terminar un rol exige `validTo`, valida que no sea anterior a `validFrom`, actualiza la asignacion de forma atomica con `UPDATE ... WHERE status = 'ACTIVE'`, registra `ended_at`, `ended_by`, `end_reason` y audita `BUSINESS_ROLE_ENDED`. Una asignacion `ENDED` no se reabre ni se termina nuevamente; cualquier reactivacion futura debe crear una nueva asignacion.
+
 ## Fuera de alcance
 
 - CRUD funcional.
 - RegisterPerson completo fuera del vertical slice v0.1.
 - Permisos IAM derivados de roles de negocio.
 - Workflows complejos de roles.
+- Delete fisico o reactivacion de la misma asignacion.
 - Relaciones funcionales.
 - Merge y deduplicacion semantica compleja.
 - IAM real.

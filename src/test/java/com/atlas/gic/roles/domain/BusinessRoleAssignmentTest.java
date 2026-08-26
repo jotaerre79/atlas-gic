@@ -46,4 +46,48 @@ class BusinessRoleAssignmentTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("validTo");
     }
+
+    @Test
+    void endsActiveAssignment() {
+        var assignment = BusinessRoleAssignment.active(
+                tenantId,
+                personId,
+                BusinessRoleType.SOCIO,
+                LocalDate.parse("2026-01-10"),
+                null);
+
+        var ended = assignment.end(LocalDate.parse("2026-08-26"));
+
+        assertThat(ended.status()).isEqualTo(BusinessRoleAssignmentStatus.ENDED);
+        assertThat(ended.validTo()).isEqualTo(LocalDate.parse("2026-08-26"));
+        assertThat(ended.assignmentId()).isEqualTo(assignment.assignmentId());
+    }
+
+    @Test
+    void rejectsEndingWithoutValidTo() {
+        var assignment = BusinessRoleAssignment.active(
+                tenantId,
+                personId,
+                BusinessRoleType.SOCIO,
+                LocalDate.parse("2026-01-10"),
+                null);
+
+        assertThatThrownBy(() -> assignment.end(null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("validTo");
+    }
+
+    @Test
+    void rejectsEndingEndedAssignmentAgain() {
+        var ended = BusinessRoleAssignment.active(
+                tenantId,
+                personId,
+                BusinessRoleType.CLIENTE,
+                LocalDate.parse("2026-01-10"),
+                null).end(LocalDate.parse("2026-08-26"));
+
+        assertThatThrownBy(() -> ended.end(LocalDate.parse("2026-08-27")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("active");
+    }
 }

@@ -4,6 +4,7 @@ import com.atlas.gic.identity.application.PersonNotFoundException;
 import com.atlas.gic.identity.application.TenantContextRequiredException;
 import com.atlas.gic.identity.domain.PersonId;
 import com.atlas.gic.roles.domain.BusinessRoleAssignment;
+import com.atlas.gic.roles.domain.BusinessRoleAssignmentId;
 import com.atlas.gic.roles.domain.BusinessRoleType;
 import com.atlas.gic.shared.tenancy.application.TenantContext;
 import com.atlas.gic.shared.tenancy.domain.TenantId;
@@ -144,6 +145,24 @@ class AssignBusinessRoleUseCaseTest {
         @Override
         public List<BusinessRoleAssignmentView> findByPerson(TenantId tenantId, PersonId personId) {
             return List.of();
+        }
+
+        @Override
+        public Optional<BusinessRoleAssignment> findById(
+                TenantId tenantId,
+                PersonId personId,
+                BusinessRoleAssignmentId assignmentId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public boolean endActive(
+                TenantId tenantId,
+                PersonId personId,
+                BusinessRoleAssignment endedAssignment,
+                String actor,
+                String reason) {
+            return false;
         }
     }
 
