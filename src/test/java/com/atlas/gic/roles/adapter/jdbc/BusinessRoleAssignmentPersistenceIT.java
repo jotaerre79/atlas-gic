@@ -107,9 +107,10 @@ class BusinessRoleAssignmentPersistenceIT {
             assertThat(jdbcTemplate.queryForObject("""
                     SELECT count(*)
                     FROM gic.business_role_assignment_audit
-                    WHERE action = 'BUSINESS_ROLE_ASSIGNED' AND actor = 'roles-it'
+                    WHERE action = 'BUSINESS_ROLE_ASSIGNED' AND actor = 'roles-it' AND person_id = ?
                     """,
-                    Integer.class)).isEqualTo(2);
+                    Integer.class,
+                    uniquePerson.value())).isEqualTo(2);
         });
     }
 
