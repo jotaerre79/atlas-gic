@@ -3,7 +3,10 @@ package com.atlas.gic.roles.adapter.web;
 import com.atlas.gic.identity.domain.PersonId;
 import com.atlas.gic.roles.application.AssignBusinessRoleCommand;
 import com.atlas.gic.roles.application.AssignBusinessRoleUseCase;
+import com.atlas.gic.roles.application.EndBusinessRoleCommand;
+import com.atlas.gic.roles.application.EndBusinessRoleUseCase;
 import com.atlas.gic.roles.application.GetBusinessRolesUseCase;
+import com.atlas.gic.roles.domain.BusinessRoleAssignmentId;
 import com.atlas.gic.roles.domain.BusinessRoleType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -26,12 +29,15 @@ import java.util.UUID;
 public class BusinessRoleAssignmentController {
 
     private final AssignBusinessRoleUseCase assignBusinessRole;
+    private final EndBusinessRoleUseCase endBusinessRole;
     private final GetBusinessRolesUseCase getBusinessRoles;
 
     public BusinessRoleAssignmentController(
             AssignBusinessRoleUseCase assignBusinessRole,
+            EndBusinessRoleUseCase endBusinessRole,
             GetBusinessRolesUseCase getBusinessRoles) {
         this.assignBusinessRole = assignBusinessRole;
+        this.endBusinessRole = endBusinessRole;
         this.getBusinessRoles = getBusinessRoles;
     }
 
@@ -72,10 +78,37 @@ public class BusinessRoleAssignmentController {
                 .toList());
     }
 
+    @PostMapping("/{assignmentId}/end")
+    BusinessRoleAssignmentResponse end(
+            @PathVariable UUID personId,
+            @PathVariable UUID assignmentId,
+            @Valid @RequestBody EndBusinessRoleRequest request,
+            HttpServletRequest httpRequest) {
+        var result = endBusinessRole.end(new EndBusinessRoleCommand(
+                PersonId.of(personId),
+                BusinessRoleAssignmentId.of(assignmentId),
+                request.validTo(),
+                request.reason(),
+                httpRequest.getHeader("X-Correlation-Id")));
+
+        return new BusinessRoleAssignmentResponse(
+                result.assignmentId().toString(),
+                result.personId().toString(),
+                result.role().name(),
+                result.status().name(),
+                result.validFrom(),
+                result.validTo());
+    }
+
     public record AssignBusinessRoleRequest(
             @NotNull BusinessRoleType role,
             @NotNull LocalDate validFrom,
             LocalDate validTo) {
+    }
+
+    public record EndBusinessRoleRequest(
+            @NotNull LocalDate validTo,
+            String reason) {
     }
 
     public record BusinessRoleAssignmentResponse(

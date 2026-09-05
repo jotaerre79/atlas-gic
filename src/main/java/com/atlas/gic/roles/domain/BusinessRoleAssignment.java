@@ -42,4 +42,19 @@ public record BusinessRoleAssignment(
                 validTo,
                 BusinessRoleAssignmentStatus.ACTIVE);
     }
+
+    public BusinessRoleAssignment end(LocalDate endDate) {
+        if (status != BusinessRoleAssignmentStatus.ACTIVE) {
+            throw new IllegalStateException("only active assignments can be ended");
+        }
+        Objects.requireNonNull(endDate, "validTo must not be null");
+        return new BusinessRoleAssignment(
+                assignmentId,
+                tenantId,
+                personId,
+                role,
+                validFrom,
+                endDate,
+                BusinessRoleAssignmentStatus.ENDED);
+    }
 }

@@ -9,9 +9,11 @@ import com.atlas.gic.identity.application.PersonSearchPage;
 import com.atlas.gic.identity.domain.Person;
 import com.atlas.gic.identity.domain.PersonId;
 import com.atlas.gic.roles.application.BusinessRoleAssignedAudit;
+import com.atlas.gic.roles.application.BusinessRoleEndedAudit;
 import com.atlas.gic.roles.application.BusinessRoleAssignmentRepository;
 import com.atlas.gic.roles.application.BusinessRoleAssignmentView;
 import com.atlas.gic.roles.domain.BusinessRoleAssignment;
+import com.atlas.gic.roles.domain.BusinessRoleAssignmentId;
 import com.atlas.gic.shared.tenancy.domain.TenantId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -216,12 +218,37 @@ class RegisterPersonHttpTest {
                 public List<BusinessRoleAssignmentView> findByPerson(TenantId tenantId, PersonId personId) {
                     return List.of();
                 }
+
+                @Override
+                public Optional<BusinessRoleAssignment> findById(
+                        TenantId tenantId,
+                        PersonId personId,
+                        BusinessRoleAssignmentId assignmentId) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public boolean endActive(
+                        TenantId tenantId,
+                        PersonId personId,
+                        BusinessRoleAssignment endedAssignment,
+                        String actor,
+                        String reason) {
+                    return false;
+                }
             };
         }
 
         @Bean
         @Primary
         BusinessRoleAssignedAudit businessRoleAssignedAudit() {
+            return entry -> {
+            };
+        }
+
+        @Bean
+        @Primary
+        BusinessRoleEndedAudit businessRoleEndedAudit() {
             return entry -> {
             };
         }

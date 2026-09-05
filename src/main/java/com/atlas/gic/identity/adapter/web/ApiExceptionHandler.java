@@ -3,6 +3,7 @@ package com.atlas.gic.identity.adapter.web;
 import com.atlas.gic.identity.application.DuplicatePersonIdentifierException;
 import com.atlas.gic.identity.application.PersonNotFoundException;
 import com.atlas.gic.identity.application.TenantContextRequiredException;
+import com.atlas.gic.roles.application.BusinessRoleAlreadyEndedException;
 import com.atlas.gic.roles.application.DuplicateActiveBusinessRoleException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -47,6 +48,14 @@ public class ApiExceptionHandler {
         var problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
         problem.setTitle("Business role conflict");
         problem.setDetail("The person already has an active assignment for this business role");
+        return problem;
+    }
+
+    @ExceptionHandler(BusinessRoleAlreadyEndedException.class)
+    ProblemDetail alreadyEnded(BusinessRoleAlreadyEndedException exception) {
+        var problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setTitle("Business role lifecycle conflict");
+        problem.setDetail("The business role assignment is not active");
         return problem;
     }
 

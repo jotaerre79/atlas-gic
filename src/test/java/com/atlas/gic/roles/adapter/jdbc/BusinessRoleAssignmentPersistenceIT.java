@@ -4,8 +4,12 @@ import com.atlas.gic.identity.application.PersonNotFoundException;
 import com.atlas.gic.identity.domain.PersonId;
 import com.atlas.gic.roles.application.AssignBusinessRoleCommand;
 import com.atlas.gic.roles.application.AssignBusinessRoleUseCase;
+import com.atlas.gic.roles.application.BusinessRoleAlreadyEndedException;
 import com.atlas.gic.roles.application.DuplicateActiveBusinessRoleException;
+import com.atlas.gic.roles.application.EndBusinessRoleCommand;
+import com.atlas.gic.roles.application.EndBusinessRoleUseCase;
 import com.atlas.gic.roles.application.GetBusinessRolesUseCase;
+import com.atlas.gic.roles.domain.BusinessRoleAssignmentId;
 import com.atlas.gic.roles.domain.BusinessRoleType;
 import com.atlas.gic.shared.tenancy.application.TenantContext;
 import com.atlas.gic.shared.tenancy.domain.TenantId;
@@ -81,9 +85,10 @@ class BusinessRoleAssignmentPersistenceIT {
                 repository,
                 new JdbcBusinessRoleAssignedAudit(jdbcTemplate),
                 () -> "roles-it");
+        var uniquePerson = seedPerson(UUID.randomUUID(), tenantA, "Multiple", "Roles");
 
-        var socio = transactionTemplate.execute(status -> useCase.assign(command(personA, BusinessRoleType.SOCIO)));
-        var cliente = transactionTemplate.execute(status -> useCase.assign(command(personA, BusinessRoleType.CLIENTE)));
+        var socio = transactionTemplate.execute(status -> useCase.assign(command(uniquePerson, BusinessRoleType.SOCIO)));
+        var cliente = transactionTemplate.execute(status -> useCase.assign(command(uniquePerson, BusinessRoleType.CLIENTE)));
 
         assertThat(socio).isNotNull();
         assertThat(cliente).isNotNull();
@@ -98,13 +103,14 @@ class BusinessRoleAssignmentPersistenceIT {
                     WHERE person_id = ?
                     """,
                     Integer.class,
-                    personA.value())).isEqualTo(2);
+                    uniquePerson.value())).isEqualTo(2);
             assertThat(jdbcTemplate.queryForObject("""
                     SELECT count(*)
                     FROM gic.business_role_assignment_audit
-                    WHERE action = 'BUSINESS_ROLE_ASSIGNED' AND actor = 'roles-it'
+                    WHERE action = 'BUSINESS_ROLE_ASSIGNED' AND actor = 'roles-it' AND person_id = ?
                     """,
-                    Integer.class)).isEqualTo(2);
+                    Integer.class,
+                    uniquePerson.value())).isEqualTo(2);
         });
     }
 
@@ -183,6 +189,129 @@ class BusinessRoleAssignmentPersistenceIT {
     }
 
     @Test
+    void endRolePersistsLifecycleMetadataAndAuditTrail() {
+        var dataSource = appDataSource();
+        var jdbcTemplate = new JdbcTemplate(dataSource);
+        var transactionTemplate = transactionTemplate(dataSource);
+        var repository = new JdbcBusinessRoleAssignmentRepository(jdbcTemplate);
+        var assignUseCase = new AssignBusinessRoleUseCase(
+                new FixedTenantContext(tenantA),
+                repository,
+                new JdbcBusinessRoleAssignedAudit(jdbcTemplate),
+                () -> "roles-it");
+        var endUseCase = new EndBusinessRoleUseCase(
+                new FixedTenantContext(tenantA),
+                repository,
+                new JdbcBusinessRoleEndedAudit(jdbcTemplate),
+                () -> "roles-it");
+        var uniquePerson = seedPerson(UUID.randomUUID(), tenantA, "End", "Role");
+
+        var assignment = transactionTemplate.execute(status -> assignUseCase.assign(command(uniquePerson, BusinessRoleType.SOCIO)));
+        var ended = transactionTemplate.execute(status -> endUseCase.end(endCommand(uniquePerson, assignment.assignmentId())));
+
+        assertThat(ended).isNotNull();
+        assertThat(ended.status().name()).isEqualTo("ENDED");
+        assertThat(ended.validTo()).isEqualTo(LocalDate.parse("2026-08-26"));
+
+        transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.queryForObject(
+                    "SELECT set_config('atlas.current_tenant', ?, true)",
+                    String.class,
+                    tenantA.toString());
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT count(*)
+                    FROM gic.business_role_assignment
+                    WHERE assignment_id = ? AND status = 'ENDED' AND ended_by = 'roles-it'
+                    """,
+                    Integer.class,
+                    assignment.assignmentId().value())).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT count(*)
+                    FROM gic.business_role_assignment_audit
+                    WHERE assignment_id = ? AND action = 'BUSINESS_ROLE_ENDED' AND actor = 'roles-it'
+                    """,
+                    Integer.class,
+                    assignment.assignmentId().value())).isEqualTo(1);
+        });
+    }
+
+    @Test
+    void endingSameAssignmentTwiceMapsToConflict() {
+        var dataSource = appDataSource();
+        var jdbcTemplate = new JdbcTemplate(dataSource);
+        var transactionTemplate = transactionTemplate(dataSource);
+        var repository = new JdbcBusinessRoleAssignmentRepository(jdbcTemplate);
+        var assignUseCase = new AssignBusinessRoleUseCase(
+                new FixedTenantContext(tenantA),
+                repository,
+                new JdbcBusinessRoleAssignedAudit(jdbcTemplate),
+                () -> "roles-it");
+        var endUseCase = new EndBusinessRoleUseCase(
+                new FixedTenantContext(tenantA),
+                repository,
+                new JdbcBusinessRoleEndedAudit(jdbcTemplate),
+                () -> "roles-it");
+        var uniquePerson = seedPerson(UUID.randomUUID(), tenantA, "End", "Twice");
+        var assignment = transactionTemplate.execute(status -> assignUseCase.assign(command(uniquePerson, BusinessRoleType.CLIENTE)));
+
+        transactionTemplate.executeWithoutResult(status -> endUseCase.end(endCommand(uniquePerson, assignment.assignmentId())));
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(
+                status -> endUseCase.end(endCommand(uniquePerson, assignment.assignmentId()))))
+                .isInstanceOf(BusinessRoleAlreadyEndedException.class);
+    }
+
+    @Test
+    void atomicEndUpdateAllowsOnlyOneSuccessfulTransition() {
+        var dataSource = appDataSource();
+        var jdbcTemplate = new JdbcTemplate(dataSource);
+        var transactionTemplate = transactionTemplate(dataSource);
+        var repository = new JdbcBusinessRoleAssignmentRepository(jdbcTemplate);
+        var assignUseCase = new AssignBusinessRoleUseCase(
+                new FixedTenantContext(tenantA),
+                repository,
+                new JdbcBusinessRoleAssignedAudit(jdbcTemplate),
+                () -> "roles-it");
+        var uniquePerson = seedPerson(UUID.randomUUID(), tenantA, "Atomic", "End");
+        var assignment = transactionTemplate.execute(status -> assignUseCase.assign(command(uniquePerson, BusinessRoleType.PROVEEDOR)));
+        var loaded = transactionTemplate.execute(status -> repository
+                .findById(tenantA, uniquePerson, assignment.assignmentId())
+                .orElseThrow());
+        var ended = loaded.end(LocalDate.parse("2026-08-26"));
+
+        var first = transactionTemplate.execute(status ->
+                repository.endActive(tenantA, uniquePerson, ended, "roles-it", "first"));
+        var second = transactionTemplate.execute(status ->
+                repository.endActive(tenantA, uniquePerson, ended, "roles-it", "second"));
+
+        assertThat(first).isTrue();
+        assertThat(second).isFalse();
+    }
+
+    @Test
+    void crossTenantAssignmentIsNotFoundForLifecycle() {
+        var dataSource = appDataSource();
+        var jdbcTemplate = new JdbcTemplate(dataSource);
+        var transactionTemplate = transactionTemplate(dataSource);
+        var repository = new JdbcBusinessRoleAssignmentRepository(jdbcTemplate);
+        var assignUseCaseB = new AssignBusinessRoleUseCase(
+                new FixedTenantContext(tenantB),
+                repository,
+                new JdbcBusinessRoleAssignedAudit(jdbcTemplate),
+                () -> "roles-it");
+        var endUseCaseA = new EndBusinessRoleUseCase(
+                new FixedTenantContext(tenantA),
+                repository,
+                new JdbcBusinessRoleEndedAudit(jdbcTemplate),
+                () -> "roles-it");
+        var assignmentB = transactionTemplate.execute(status -> assignUseCaseB.assign(command(personB, BusinessRoleType.SOCIO)));
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(
+                status -> endUseCaseA.end(endCommand(personB, assignmentB.assignmentId()))))
+                .isInstanceOf(PersonNotFoundException.class);
+    }
+
+    @Test
     void rlsDeniesRoleRowsWithoutTenantContextAndCrossTenantWrites() throws Exception {
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), APP_USER, APP_PASSWORD);
              var statement = connection.createStatement()) {
@@ -199,6 +328,13 @@ class BusinessRoleAssignmentPersistenceIT {
                     VALUES ('%s', '%s', '%s', 'SOCIO', 'ACTIVE', '2026-08-26', 'rls-test')
                     """.formatted(UUID.randomUUID(), tenantB, personB)))
                     .hasMessageContaining("violates row-level security policy");
+
+            var updated = statement.executeUpdate("""
+                    UPDATE gic.business_role_assignment
+                    SET status = 'ENDED', valid_to = '2026-08-26', ended_at = now(), ended_by = 'rls-test'
+                    WHERE tenant_id = '%s'
+                    """.formatted(tenantB));
+            assertThat(updated).isZero();
         }
     }
 
@@ -209,6 +345,15 @@ class BusinessRoleAssignmentPersistenceIT {
                 LocalDate.parse("2026-08-26"),
                 null,
                 "corr-role-it");
+    }
+
+    private static EndBusinessRoleCommand endCommand(PersonId personId, BusinessRoleAssignmentId assignmentId) {
+        return new EndBusinessRoleCommand(
+                personId,
+                assignmentId,
+                LocalDate.parse("2026-08-26"),
+                "completed lifecycle",
+                "corr-end-it");
     }
 
     private static PersonId seedPerson(UUID personId, TenantId tenantId, String givenName, String familyName) {
