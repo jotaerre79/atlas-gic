@@ -32,6 +32,7 @@ class RegisterPersonPersistenceIT {
     private static final String APP_USER = "atlas_gic_person_app";
     private static final String APP_PASSWORD = "atlas_gic_person_app_password";
     private static TenantId tenantId;
+    private static TenantId otherTenantId;
 
     @BeforeAll
     static void migrateAndSeed() throws Exception {
@@ -42,6 +43,7 @@ class RegisterPersonPersistenceIT {
                 .migrate();
 
         tenantId = TenantId.of(UUID.randomUUID());
+        otherTenantId = TenantId.of(UUID.randomUUID());
 
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.createStatement()) {
@@ -52,7 +54,21 @@ class RegisterPersonPersistenceIT {
                     INSERT INTO gic.tenants (tenant_id, code, display_name)
                     VALUES ('%s', 'person-it', 'Person IT')
                     """.formatted(tenantId));
+            statement.executeUpdate("""
+                    INSERT INTO gic.tenants (tenant_id, code, display_name)
+                    VALUES ('%s', 'person-other-it', 'Person Other IT')
+                    """.formatted(otherTenantId));
         }
+    }
+
+    @Test
+    void appConnectionUsesOrdinaryRoleSubjectToRls() {
+        var jdbcTemplate = new JdbcTemplate(appDataSource());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT current_user", String.class)).isEqualTo(APP_USER);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user",
+                Boolean.class)).isFalse();
     }
 
     @Test
@@ -60,13 +76,15 @@ class RegisterPersonPersistenceIT {
         var dataSource = appDataSource();
         var jdbcTemplate = new JdbcTemplate(dataSource);
         var transactionTemplate = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
+        var identifier = uniqueIdentifier();
+        var correlationId = "corr-" + identifier;
         var useCase = new RegisterPersonUseCase(
                 new FixedTenantContext(tenantId),
                 new JdbcPersonRepository(jdbcTemplate),
                 new JdbcPersonRegistrationAudit(jdbcTemplate),
                 () -> "persistence-it");
 
-        var result = transactionTemplate.execute(status -> useCase.register(validCommand("1234567")));
+        var result = transactionTemplate.execute(status -> useCase.register(validCommand(identifier, correlationId)));
 
         assertThat(result).isNotNull();
         assertThat(result.displayName()).isEqualTo("Juan Perez");
@@ -76,13 +94,66 @@ class RegisterPersonPersistenceIT {
                     "SELECT set_config('atlas.current_tenant', ?, true)",
                     String.class,
                     tenantId.toString());
-            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM gic.person", Integer.class)).isEqualTo(1);
-            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM gic.person_identifier", Integer.class)).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM gic.person WHERE person_id = ? AND tenant_id = ?",
+                    Integer.class,
+                    result.personId().value(),
+                    tenantId.value())).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT count(*) FROM gic.person_identifier
+                    WHERE person_id = ? AND tenant_id = ? AND normalized_identifier_value = ?
+                    """,
+                    Integer.class,
+                    result.personId().value(),
+                    tenantId.value(),
+                    normalizedIdentifier(identifier))).isEqualTo(1);
             assertThat(jdbcTemplate.queryForObject("""
                     SELECT count(*) FROM gic.person_audit
-                    WHERE action = 'PERSON_REGISTERED' AND actor = 'persistence-it'
-                    """, Integer.class)).isEqualTo(1);
+                    WHERE action = 'PERSON_REGISTERED'
+                      AND actor = 'persistence-it'
+                      AND tenant_id = ?
+                      AND person_id = ?
+                      AND correlation_id = ?
+                    """,
+                    Integer.class,
+                    tenantId.value(),
+                    result.personId().value(),
+                    correlationId)).isEqualTo(1);
         });
+    }
+
+    @Test
+    void personAuditIsVisibleOnlyForOwningTenantContext() {
+        var dataSource = appDataSource();
+        var jdbcTemplate = new JdbcTemplate(dataSource);
+        var transactionTemplate = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
+        var identifier = uniqueIdentifier();
+        var correlationId = "corr-" + identifier;
+        var useCase = new RegisterPersonUseCase(
+                new FixedTenantContext(tenantId),
+                new JdbcPersonRepository(jdbcTemplate),
+                new JdbcPersonRegistrationAudit(jdbcTemplate),
+                () -> "persistence-it");
+
+        var result = transactionTemplate.execute(status -> useCase.register(validCommand(identifier, correlationId)));
+
+        assertThat(result).isNotNull();
+        transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.queryForObject(
+                    "SELECT set_config('atlas.current_tenant', ?, true)",
+                    String.class,
+                    tenantId.toString());
+            assertThat(auditRowsFor(jdbcTemplate, result.personId().value(), correlationId)).isEqualTo(1);
+        });
+        transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.queryForObject(
+                    "SELECT set_config('atlas.current_tenant', ?, true)",
+                    String.class,
+                    otherTenantId.toString());
+            assertThat(auditRowsFor(jdbcTemplate, result.personId().value(), correlationId)).isZero();
+        });
+        transactionTemplate.executeWithoutResult(status ->
+                assertThat(auditRowsFor(jdbcTemplate, result.personId().value(), correlationId)).isZero());
     }
 
     @Test
@@ -90,15 +161,17 @@ class RegisterPersonPersistenceIT {
         var dataSource = appDataSource();
         var jdbcTemplate = new JdbcTemplate(dataSource);
         var transactionTemplate = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
+        var identifier = uniqueIdentifier();
         var useCase = new RegisterPersonUseCase(
                 new FixedTenantContext(tenantId),
                 new JdbcPersonRepository(jdbcTemplate),
                 new JdbcPersonRegistrationAudit(jdbcTemplate),
                 () -> "persistence-it");
 
-        transactionTemplate.executeWithoutResult(status -> useCase.register(validCommand("9999999")));
+        transactionTemplate.executeWithoutResult(status -> useCase.register(validCommand(identifier, "corr-" + identifier)));
 
-        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> useCase.register(validCommand("9999999"))))
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(
+                status -> useCase.register(validCommand(identifier, "corr-duplicate-" + identifier))))
                 .isInstanceOf(DuplicatePersonIdentifierException.class);
     }
 
@@ -110,13 +183,34 @@ class RegisterPersonPersistenceIT {
         return dataSource;
     }
 
-    private RegisterPersonCommand validCommand(String identifierValue) {
+    private int auditRowsFor(JdbcTemplate jdbcTemplate, UUID personId, String correlationId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT count(*) FROM gic.person_audit
+                WHERE action = 'PERSON_REGISTERED'
+                  AND actor = 'persistence-it'
+                  AND person_id = ?
+                  AND correlation_id = ?
+                """,
+                Integer.class,
+                personId,
+                correlationId);
+    }
+
+    private String uniqueIdentifier() {
+        return UUID.randomUUID().toString();
+    }
+
+    private String normalizedIdentifier(String identifier) {
+        return identifier.toUpperCase().replaceAll("[^A-Z0-9]", "");
+    }
+
+    private RegisterPersonCommand validCommand(String identifierValue, String correlationId) {
         return new RegisterPersonCommand(
                 "Juan",
                 null,
                 "Perez",
                 new RegisterPersonCommand.IdentifierCommand("CI", identifierValue, "PY"),
-                "corr-persistence");
+                correlationId);
     }
 
     private record FixedTenantContext(TenantId tenantId) implements TenantContext {
