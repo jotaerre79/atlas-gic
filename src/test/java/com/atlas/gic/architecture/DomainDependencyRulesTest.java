@@ -3,6 +3,7 @@ package com.atlas.gic.architecture;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 class DomainDependencyRulesTest {
@@ -41,5 +42,14 @@ class DomainDependencyRulesTest {
                         "..shared.security..",
                         "..roles..")
                 .check(classes);
+    }
+
+    @Test
+    void noUniversalEntityClassIsIntroduced() {
+        var classes = new ClassFileImporter().importPackages("com.atlas.gic");
+
+        assertThat(classes.stream()
+                .anyMatch(javaClass -> javaClass.getSimpleName().equals("Entity")))
+                .isFalse();
     }
 }

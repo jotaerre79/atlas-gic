@@ -2,6 +2,7 @@ package com.atlas.gic.roles.adapter.web;
 
 import com.atlas.gic.identity.application.PersonReadRepository;
 import com.atlas.gic.identity.application.OrganizationRegistrationAudit;
+import com.atlas.gic.identity.application.OrganizationReadRepository;
 import com.atlas.gic.identity.application.OrganizationRepository;
 import com.atlas.gic.identity.application.PersonRepository;
 import com.atlas.gic.identity.application.PersonSearchPage;
@@ -378,6 +379,28 @@ class BusinessRoleAssignmentHttpTest {
         @Primary
         OrganizationRepository organizationRepository() {
             return organization -> {
+            };
+        }
+
+        @Bean
+        @Primary
+        OrganizationReadRepository organizationReadRepository() {
+            return new OrganizationReadRepository() {
+                @Override
+                public Optional<com.atlas.gic.identity.application.OrganizationView> findById(
+                        TenantId tenantId,
+                        com.atlas.gic.identity.domain.OrganizationId organizationId) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public com.atlas.gic.identity.application.OrganizationSearchPage search(
+                        TenantId tenantId,
+                        String query,
+                        int page,
+                        int size) {
+                    return new com.atlas.gic.identity.application.OrganizationSearchPage(List.of(), page, size, 0);
+                }
             };
         }
 

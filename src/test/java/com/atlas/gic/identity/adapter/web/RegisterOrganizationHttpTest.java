@@ -3,6 +3,7 @@ package com.atlas.gic.identity.adapter.web;
 import com.atlas.gic.identity.application.DuplicateOrganizationIdentifierException;
 import com.atlas.gic.identity.application.OrganizationRegisteredAuditEntry;
 import com.atlas.gic.identity.application.OrganizationRegistrationAudit;
+import com.atlas.gic.identity.application.OrganizationReadRepository;
 import com.atlas.gic.identity.application.OrganizationRepository;
 import com.atlas.gic.identity.application.PersonReadRepository;
 import com.atlas.gic.identity.application.PersonRegisteredAuditEntry;
@@ -205,6 +206,28 @@ class RegisterOrganizationHttpTest {
         @Primary
         RecordingOrganizationRegistrationAudit recordingOrganizationRegistrationAudit() {
             return new RecordingOrganizationRegistrationAudit();
+        }
+
+        @Bean
+        @Primary
+        OrganizationReadRepository organizationReadRepository() {
+            return new OrganizationReadRepository() {
+                @Override
+                public Optional<com.atlas.gic.identity.application.OrganizationView> findById(
+                        TenantId tenantId,
+                        com.atlas.gic.identity.domain.OrganizationId organizationId) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public com.atlas.gic.identity.application.OrganizationSearchPage search(
+                        TenantId tenantId,
+                        String query,
+                        int page,
+                        int size) {
+                    return new com.atlas.gic.identity.application.OrganizationSearchPage(List.of(), page, size, 0);
+                }
+            };
         }
 
         @Bean
