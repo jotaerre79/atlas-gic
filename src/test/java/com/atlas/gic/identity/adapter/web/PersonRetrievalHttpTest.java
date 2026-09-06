@@ -1,6 +1,8 @@
 package com.atlas.gic.identity.adapter.web;
 
 import com.atlas.gic.identity.application.PersonReadRepository;
+import com.atlas.gic.identity.application.OrganizationRegistrationAudit;
+import com.atlas.gic.identity.application.OrganizationRepository;
 import com.atlas.gic.identity.application.PersonSearchItem;
 import com.atlas.gic.identity.application.PersonSearchPage;
 import com.atlas.gic.identity.application.PersonView;
@@ -243,6 +245,20 @@ class PersonRetrievalHttpTest {
         @Bean
         @Primary
         BusinessRoleEndedAudit businessRoleEndedAudit() {
+            return entry -> {
+            };
+        }
+
+        @Bean
+        @Primary
+        OrganizationRepository organizationRepository() {
+            return organization -> {
+            };
+        }
+
+        @Bean
+        @Primary
+        OrganizationRegistrationAudit organizationRegistrationAudit() {
             return entry -> {
             };
         }

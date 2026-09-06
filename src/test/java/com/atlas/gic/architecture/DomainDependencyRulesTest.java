@@ -29,4 +29,17 @@ class DomainDependencyRulesTest {
                 .should().dependOnClassesThat().resideInAnyPackage("..shared.security..")
                 .check(classes);
     }
+
+    @Test
+    void organizationDomainDoesNotDependOnIamOrBusinessRoles() {
+        var classes = new ClassFileImporter().importPackages("com.atlas.gic");
+
+        noClasses()
+                .that().resideInAPackage("..identity.domain..")
+                .and().haveSimpleNameContaining("Organization")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "..shared.security..",
+                        "..roles..")
+                .check(classes);
+    }
 }

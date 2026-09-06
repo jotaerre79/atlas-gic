@@ -1,6 +1,7 @@
 package com.atlas.gic.identity.adapter.web;
 
 import com.atlas.gic.identity.application.DuplicatePersonIdentifierException;
+import com.atlas.gic.identity.application.DuplicateOrganizationIdentifierException;
 import com.atlas.gic.identity.application.PersonNotFoundException;
 import com.atlas.gic.identity.application.TenantContextRequiredException;
 import com.atlas.gic.roles.application.BusinessRoleAlreadyEndedException;
@@ -40,6 +41,14 @@ public class ApiExceptionHandler {
         var problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
         problem.setTitle("Identifier conflict");
         problem.setDetail("A person with the same identifier already exists for this tenant");
+        return problem;
+    }
+
+    @ExceptionHandler(DuplicateOrganizationIdentifierException.class)
+    ProblemDetail organizationConflict(DuplicateOrganizationIdentifierException exception) {
+        var problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setTitle("Identifier conflict");
+        problem.setDetail("An organization with the same identifier already exists for this tenant");
         return problem;
     }
 
