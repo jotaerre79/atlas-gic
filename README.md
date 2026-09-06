@@ -157,6 +157,77 @@ Limitaciones explicitas:
 - No se publican eventos externos.
 - No se agrega Kafka, RabbitMQ, Redis, Kubernetes, event sourcing ni CQRS fisico.
 
+## Organization Retrieval v0.1
+
+Endpoints de lectura basica:
+
+```text
+GET /api/v1/organizations/{organizationId}
+GET /api/v1/organizations?query=<text>&page=0&size=20
+```
+
+Las lecturas operan exclusivamente dentro del tenant autorizado actual. El `organizationId` por si solo no autoriza acceso y una organizacion de otro tenant se trata como no encontrada para no filtrar existencia cross-tenant.
+
+Detalle por ID:
+
+```json
+{
+  "organizationId": "4c0f0d7d-4964-4e3c-82c5-f8d408c81e5d",
+  "legalName": "Atlas Cooperativa",
+  "tradeName": "Atlas",
+  "status": "ACTIVE",
+  "identifiers": [
+    {
+      "type": "RUC",
+      "countryCode": "PY",
+      "maskedValue": "****3456"
+    }
+  ],
+  "createdAt": "2026-09-06T00:00:00Z"
+}
+```
+
+Busqueda paginada:
+
+```json
+{
+  "items": [
+    {
+      "organizationId": "4c0f0d7d-4964-4e3c-82c5-f8d408c81e5d",
+      "legalName": "Atlas Cooperativa",
+      "tradeName": "Atlas",
+      "status": "ACTIVE",
+      "identifierType": "RUC",
+      "identifierCountryCode": "PY"
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "total": 1
+}
+```
+
+Reglas implementadas:
+
+- `organizationId` debe ser UUID valido.
+- `query` ausente, vacio o compuesto por espacios significa sin filtro.
+- La busqueda compara `legalName` y `tradeName` de forma case-insensitive.
+- Cuando `query` representa un RUC, se normaliza de forma compatible con `OrganizationIdentifier`.
+- `%`, `_` y `\` se tratan como texto cuando se usan en busqueda por nombre.
+- Paginacion: `page` inicia en `0`, `size` default `20`, minimo `1`, maximo `100`.
+- Orden estable: `lower(legal_name), organization_id`.
+- Una pagina fuera de rango devuelve `items=[]` con `total` correcto.
+- La lista no devuelve RUC completo, RUC normalizado ni RUC enmascarado.
+- El detalle devuelve solo `maskedValue` del identificador.
+
+Limitaciones explicitas:
+
+- La busqueda `%texto%` sobre nombres es basica y debe revisarse antes de volumenes altos.
+- No se agrega `pg_trgm`, Elasticsearch ni OpenSearch.
+- No hay actualizacion, eliminacion, lifecycle, contactos, direcciones, representantes ni relaciones Persona-Organizacion.
+- No hay validacion fiscal externa de RUC ni integraciones SET/SIFEN/ERP.
+- No se publican eventos externos.
+
 ## Fuera de alcance
 
 - CRUD funcional.

@@ -4,6 +4,7 @@ import com.atlas.gic.shared.audit.application.PlatformAccessAudit;
 import com.atlas.gic.shared.audit.application.PlatformAccessAuditEntry;
 import com.atlas.gic.identity.application.PersonReadRepository;
 import com.atlas.gic.identity.application.OrganizationRegistrationAudit;
+import com.atlas.gic.identity.application.OrganizationReadRepository;
 import com.atlas.gic.identity.application.OrganizationRepository;
 import com.atlas.gic.identity.application.PersonRegisteredAuditEntry;
 import com.atlas.gic.identity.application.PersonRegistrationAudit;
@@ -224,6 +225,27 @@ class PlatformAccessContextTest {
         @Bean
         OrganizationRepository organizationRepository() {
             return organization -> {
+            };
+        }
+
+        @Bean
+        OrganizationReadRepository organizationReadRepository() {
+            return new OrganizationReadRepository() {
+                @Override
+                public Optional<com.atlas.gic.identity.application.OrganizationView> findById(
+                        TenantId tenantId,
+                        com.atlas.gic.identity.domain.OrganizationId organizationId) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public com.atlas.gic.identity.application.OrganizationSearchPage search(
+                        TenantId tenantId,
+                        String query,
+                        int page,
+                        int size) {
+                    return new com.atlas.gic.identity.application.OrganizationSearchPage(List.of(), page, size, 0);
+                }
             };
         }
 

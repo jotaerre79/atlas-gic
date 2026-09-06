@@ -2,6 +2,7 @@ package com.atlas.gic.identity.adapter.web;
 
 import com.atlas.gic.identity.application.DuplicatePersonIdentifierException;
 import com.atlas.gic.identity.application.DuplicateOrganizationIdentifierException;
+import com.atlas.gic.identity.application.OrganizationNotFoundException;
 import com.atlas.gic.identity.application.PersonNotFoundException;
 import com.atlas.gic.identity.application.TenantContextRequiredException;
 import com.atlas.gic.roles.application.BusinessRoleAlreadyEndedException;
@@ -73,6 +74,14 @@ public class ApiExceptionHandler {
         var problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
         problem.setTitle("Person not found");
         problem.setDetail("Person was not found");
+        return problem;
+    }
+
+    @ExceptionHandler(OrganizationNotFoundException.class)
+    ProblemDetail organizationNotFound(OrganizationNotFoundException exception) {
+        var problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+        problem.setTitle("Organization not found");
+        problem.setDetail("Organization was not found");
         return problem;
     }
 }
