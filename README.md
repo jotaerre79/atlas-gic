@@ -85,6 +85,78 @@ La tabla de asignaciones es tenant-scoped, usa FK tenant-aware hacia `gic.person
 
 El lifecycle minimo permite solamente la transicion `ACTIVE -> ENDED`. Terminar un rol exige `validTo`, valida que no sea anterior a `validFrom`, actualiza la asignacion de forma atomica con `UPDATE ... WHERE status = 'ACTIVE'`, registra `ended_at`, `ended_by`, `end_reason` y audita `BUSINESS_ROLE_ENDED`. Una asignacion `ENDED` no se reabre ni se termina nuevamente; cualquier reactivacion futura debe crear una nueva asignacion.
 
+## RegisterOrganization v0.1
+
+Endpoint inicial:
+
+```text
+POST /api/v1/organizations
+```
+
+Este slice registra una Organizacion dentro del tenant autorizado actual. `Organization` es un aggregate separado de `Person`; no se introduce una clase, tabla o aggregate universal `Entity`. El `tenantId` no se acepta desde el body como autoridad y el header temporal `X-Tenant-Id` solo selecciona un tenant cuando el principal ya esta autorizado para ese tenant.
+
+Entrada minima:
+
+```json
+{
+  "legalName": "Atlas Cooperativa",
+  "tradeName": "Atlas",
+  "identifier": {
+    "type": "RUC",
+    "value": "80012345-6",
+    "countryCode": "PY"
+  },
+  "correlationId": "corr-example-001"
+}
+```
+
+Respuesta exitosa minima:
+
+```json
+{
+  "organizationId": "4c0f0d7d-4964-4e3c-82c5-f8d408c81e5d",
+  "legalName": "Atlas Cooperativa",
+  "tradeName": "Atlas",
+  "status": "ACTIVE",
+  "identifier": {
+    "type": "RUC",
+    "countryCode": "PY",
+    "maskedValue": "****3456"
+  },
+  "createdAt": "2026-09-05T21:00:00Z"
+}
+```
+
+Reglas implementadas:
+
+- `legalName` es obligatorio y se normalizan espacios exteriores.
+- `tradeName` es opcional y se normalizan espacios exteriores.
+- El identificador inicial soportado es `RUC` con `countryCode=PY`.
+- El identificador se normaliza de forma deterministica para unicidad por tenant: se remueven separadores y caracteres no alfanumericos, y el resultado debe contener solo digitos.
+- La longitud normalizada aceptada es de 2 a 20 digitos; el valor original recibido no puede superar 160 caracteres.
+- Un mismo RUC normalizado no puede repetirse dentro del mismo tenant.
+- El mismo RUC puede existir en tenants diferentes.
+- El estado inicial es `ACTIVE`.
+- La transaccion persiste organizacion, identificador y auditoria de forma atomica.
+- Registrar una Organizacion no crea usuario IAM ni asigna roles de negocio.
+
+Persistencia inicial:
+
+- `gic.organization`
+- `gic.organization_identifier`
+- `gic.organization_audit`
+
+Las tablas tenant-scoped usan `tenant_id`, Row Level Security con `ENABLE` y `FORCE`, y politicas deny-by-default cuando no existe tenant context valido. La auditoria registra `ORGANIZATION_REGISTERED` con actor, tenant, organizacion, correlation ID y timestamp; no registra RUC completo ni nombres completos en logs tecnicos.
+
+Limitaciones explicitas:
+
+- No hay consulta, busqueda, actualizacion ni eliminacion de organizaciones.
+- No hay lifecycle de Organization.
+- No hay contactos, direcciones, representantes ni relaciones Persona-Organizacion.
+- No hay validacion fiscal completa contra SET ni integracion SIFEN/ERP.
+- No se publican eventos externos.
+- No se agrega Kafka, RabbitMQ, Redis, Kubernetes, event sourcing ni CQRS fisico.
+
 ## Fuera de alcance
 
 - CRUD funcional.

@@ -3,6 +3,8 @@ package com.atlas.gic.security;
 import com.atlas.gic.shared.audit.application.PlatformAccessAudit;
 import com.atlas.gic.shared.audit.application.PlatformAccessAuditEntry;
 import com.atlas.gic.identity.application.PersonReadRepository;
+import com.atlas.gic.identity.application.OrganizationRegistrationAudit;
+import com.atlas.gic.identity.application.OrganizationRepository;
 import com.atlas.gic.identity.application.PersonRegisteredAuditEntry;
 import com.atlas.gic.identity.application.PersonRegistrationAudit;
 import com.atlas.gic.identity.application.PersonRepository;
@@ -215,6 +217,18 @@ class PlatformAccessContextTest {
 
         @Bean
         BusinessRoleEndedAudit businessRoleEndedAudit() {
+            return entry -> {
+            };
+        }
+
+        @Bean
+        OrganizationRepository organizationRepository() {
+            return organization -> {
+            };
+        }
+
+        @Bean
+        OrganizationRegistrationAudit organizationRegistrationAudit() {
             return entry -> {
             };
         }
