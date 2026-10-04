@@ -45,6 +45,19 @@ class DomainDependencyRulesTest {
     }
 
     @Test
+    void relationshipsDomainDoesNotDependOnAdaptersIamErpOrSifen() {
+        var classes = new ClassFileImporter().importPackages("com.atlas.gic");
+
+        noClasses()
+                .that().resideInAPackage("..relationships.domain..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "..adapter..",
+                        "..shared.security..",
+                        "..integration..")
+                .check(classes);
+    }
+
+    @Test
     void noUniversalEntityClassIsIntroduced() {
         var classes = new ClassFileImporter().importPackages("com.atlas.gic");
 

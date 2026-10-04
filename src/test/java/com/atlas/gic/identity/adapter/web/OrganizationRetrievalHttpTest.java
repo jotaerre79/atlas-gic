@@ -23,6 +23,10 @@ import com.atlas.gic.roles.application.BusinessRoleAssignmentView;
 import com.atlas.gic.roles.application.BusinessRoleEndedAudit;
 import com.atlas.gic.roles.domain.BusinessRoleAssignment;
 import com.atlas.gic.roles.domain.BusinessRoleAssignmentId;
+import com.atlas.gic.relationships.application.PersonOrganizationRelationshipCreatedAudit;
+import com.atlas.gic.relationships.application.PersonOrganizationRelationshipRepository;
+import com.atlas.gic.relationships.support.NoopPersonOrganizationRelationshipCreatedAudit;
+import com.atlas.gic.relationships.support.NoopPersonOrganizationRelationshipRepository;
 import com.atlas.gic.shared.tenancy.domain.TenantId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -352,6 +356,18 @@ class OrganizationRetrievalHttpTest {
         BusinessRoleEndedAudit businessRoleEndedAudit() {
             return entry -> {
             };
+        }
+
+        @Bean
+        @Primary
+        PersonOrganizationRelationshipRepository personOrganizationRelationshipRepository() {
+            return new NoopPersonOrganizationRelationshipRepository();
+        }
+
+        @Bean
+        @Primary
+        PersonOrganizationRelationshipCreatedAudit personOrganizationRelationshipCreatedAudit() {
+            return new NoopPersonOrganizationRelationshipCreatedAudit();
         }
     }
 

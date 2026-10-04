@@ -228,6 +228,109 @@ Limitaciones explicitas:
 - No hay validacion fiscal externa de RUC ni integraciones SET/SIFEN/ERP.
 - No se publican eventos externos.
 
+## Person-Organization Relationship Assignment v0.1
+
+Endpoints iniciales para relaciones explicitas entre Persona y Organizacion dentro de un mismo tenant:
+
+```text
+POST /api/v1/persons/{personId}/organization-relationships
+GET /api/v1/persons/{personId}/organization-relationships?page=0&size=20&status=ACTIVE
+```
+
+El tipo inicial soportado es `REPRESENTATIVE_OF`. Esta relacion expresa un vinculo de identidad de negocio; no concede permisos IAM, autorizacion tecnica, firma, representacion legal automatica ni roles de negocio.
+
+Creacion:
+
+```json
+{
+  "organizationId": "4c0f0d7d-4964-4e3c-82c5-f8d408c81e5d",
+  "relationshipType": "REPRESENTATIVE_OF",
+  "validFrom": "2026-09-07",
+  "correlationId": "corr-example"
+}
+```
+
+Respuesta de creacion:
+
+```json
+{
+  "relationshipId": "1b494f6a-2df4-4905-b2c7-9a4bb6a15af0",
+  "personId": "43bd2079-1f2e-47f2-b4a0-64e1054c45fb",
+  "organizationId": "4c0f0d7d-4964-4e3c-82c5-f8d408c81e5d",
+  "relationshipType": "REPRESENTATIVE_OF",
+  "validFrom": "2026-09-07",
+  "validTo": null,
+  "status": "ACTIVE",
+  "createdAt": "2026-09-07T00:00:00Z"
+}
+```
+
+No se emite header `Location` en este slice porque el endpoint GET individual de relacion todavia no esta implementado. El recurso individual se materializara en una iteracion posterior si se confirma la necesidad.
+
+Listado:
+
+```json
+{
+  "items": [
+    {
+      "relationshipId": "1b494f6a-2df4-4905-b2c7-9a4bb6a15af0",
+      "personId": "43bd2079-1f2e-47f2-b4a0-64e1054c45fb",
+      "organizationId": "4c0f0d7d-4964-4e3c-82c5-f8d408c81e5d",
+      "organizationLegalName": "Atlas Cooperativa",
+      "organizationTradeName": "Atlas",
+      "relationshipType": "REPRESENTATIVE_OF",
+      "validFrom": "2026-09-07",
+      "validTo": null,
+      "status": "ACTIVE",
+      "createdAt": "2026-09-07T00:00:00Z"
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "total": 1
+}
+```
+
+Reglas implementadas:
+
+- `personId` y `organizationId` deben ser UUID validos.
+- Persona y Organizacion deben existir y ser visibles dentro del tenant autorizado actual.
+- IDs por si solos no autorizan acceso; un recurso de otro tenant se trata como no encontrado.
+- `relationshipType` inicial: `REPRESENTATIVE_OF`.
+- `validFrom` es obligatorio.
+- `validTo` inicial es `null`.
+- `status` inicial es `ACTIVE`.
+- No se permite duplicar una relacion `ACTIVE` para la misma combinacion `(tenant, person, organization, type)`.
+- No se crea relacion inversa automatica.
+- No se modifica Person ni Organization.
+- No se asigna BusinessRole.
+- No se concede ningun permiso IAM.
+
+Persistencia inicial:
+
+- `gic.person_organization_relationship`
+- `gic.person_organization_relationship_audit`
+
+Las tablas son tenant-scoped, usan FKs tenant-aware hacia `gic.person` y `gic.organization`, RLS con `ENABLE` y `FORCE`, policies con `USING` y `WITH CHECK`, y un indice unico parcial para impedir duplicados activos. La auditoria registra `PERSON_ORGANIZATION_RELATIONSHIP_CREATED` con actor, tenant, relacion, persona, organizacion, tipo de relacion, correlacion y timestamp. No se registra RUC, nombres completos ni payload completo.
+
+Paginacion de listado:
+
+- `page` inicia en `0`.
+- `size` default `20`, minimo `1`, maximo `100`.
+- `status` soportado inicialmente: `ACTIVE`.
+- Orden estable: `validFrom DESC, relationshipId`.
+- Una pagina fuera de rango devuelve `items=[]` y `total` correcto.
+- La respuesta no devuelve `tenantId` ni RUC.
+
+Limitaciones explicitas:
+
+- No hay GET individual de relacion.
+- No hay finalizacion, revocacion ni reactivacion de relaciones.
+- No hay otros tipos de relacion.
+- No hay relaciones Person-Person ni Organization-Organization.
+- No hay autorizacion legal, poderes, documentos, contactos o direcciones.
+- No hay roles automaticos, IAM, ERP, SIFEN, deduplicacion, merge ni eventos externos.
+
 ## Fuera de alcance
 
 - CRUD funcional.
@@ -235,7 +338,7 @@ Limitaciones explicitas:
 - Permisos IAM derivados de roles de negocio.
 - Workflows complejos de roles.
 - Delete fisico o reactivacion de la misma asignacion.
-- Relaciones funcionales.
+- Relaciones avanzadas fuera de Persona-Organizacion `REPRESENTATIVE_OF`.
 - Merge y deduplicacion semantica compleja.
 - IAM real.
 - OpenAPI definitivo.
