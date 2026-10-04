@@ -18,6 +18,10 @@ import com.atlas.gic.roles.application.BusinessRoleAssignmentRepository;
 import com.atlas.gic.roles.application.BusinessRoleAssignmentView;
 import com.atlas.gic.roles.domain.BusinessRoleAssignment;
 import com.atlas.gic.roles.domain.BusinessRoleAssignmentId;
+import com.atlas.gic.relationships.application.PersonOrganizationRelationshipCreatedAudit;
+import com.atlas.gic.relationships.application.PersonOrganizationRelationshipRepository;
+import com.atlas.gic.relationships.support.NoopPersonOrganizationRelationshipCreatedAudit;
+import com.atlas.gic.relationships.support.NoopPersonOrganizationRelationshipRepository;
 import com.atlas.gic.shared.tenancy.application.TenantContextHolder;
 import com.atlas.gic.shared.tenancy.domain.TenantId;
 import org.junit.jupiter.api.Test;
@@ -253,6 +257,16 @@ class PlatformAccessContextTest {
         OrganizationRegistrationAudit organizationRegistrationAudit() {
             return entry -> {
             };
+        }
+
+        @Bean
+        PersonOrganizationRelationshipRepository personOrganizationRelationshipRepository() {
+            return new NoopPersonOrganizationRelationshipRepository();
+        }
+
+        @Bean
+        PersonOrganizationRelationshipCreatedAudit personOrganizationRelationshipCreatedAudit() {
+            return new NoopPersonOrganizationRelationshipCreatedAudit();
         }
 
         @RestController
