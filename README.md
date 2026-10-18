@@ -235,6 +235,7 @@ Endpoints iniciales para relaciones explicitas entre Persona y Organizacion dent
 ```text
 POST /api/v1/persons/{personId}/organization-relationships
 GET /api/v1/persons/{personId}/organization-relationships?page=0&size=20&status=ACTIVE
+POST /api/v1/persons/{personId}/organization-relationships/{relationshipId}/end
 ```
 
 El tipo inicial soportado es `REPRESENTATIVE_OF`. Esta relacion expresa un vinculo de identidad de negocio; no concede permisos IAM, autorizacion tecnica, firma, representacion legal automatica ni roles de negocio.
@@ -266,6 +267,32 @@ Respuesta de creacion:
 ```
 
 No se emite header `Location` en este slice porque el endpoint GET individual de relacion todavia no esta implementado. El recurso individual se materializara en una iteracion posterior si se confirma la necesidad.
+
+Finalizacion:
+
+```json
+{
+  "validTo": "2026-10-04",
+  "correlationId": "corr-relationship-end-example"
+}
+```
+
+Respuesta de finalizacion:
+
+```json
+{
+  "relationshipId": "1b494f6a-2df4-4905-b2c7-9a4bb6a15af0",
+  "personId": "43bd2079-1f2e-47f2-b4a0-64e1054c45fb",
+  "organizationId": "4c0f0d7d-4964-4e3c-82c5-f8d408c81e5d",
+  "relationshipType": "REPRESENTATIVE_OF",
+  "validFrom": "2026-09-07",
+  "validTo": "2026-10-04",
+  "status": "ENDED",
+  "createdAt": "2026-09-07T00:00:00Z"
+}
+```
+
+La finalizacion no emite `Location` porque no crea un recurso nuevo.
 
 Listado:
 
@@ -301,6 +328,9 @@ Reglas implementadas:
 - `validTo` inicial es `null`.
 - `status` inicial es `ACTIVE`.
 - No se permite duplicar una relacion `ACTIVE` para la misma combinacion `(tenant, person, organization, type)`.
+- Una relacion `ACTIVE` puede finalizarse una sola vez con `validTo >= validFrom`.
+- Una relacion `ENDED` no puede finalizarse nuevamente ni reabrirse en la misma fila.
+- Despues de finalizar una relacion, puede crearse una nueva relacion `ACTIVE` para la misma combinacion y conservar el historial.
 - No se crea relacion inversa automatica.
 - No se modifica Person ni Organization.
 - No se asigna BusinessRole.
@@ -311,7 +341,7 @@ Persistencia inicial:
 - `gic.person_organization_relationship`
 - `gic.person_organization_relationship_audit`
 
-Las tablas son tenant-scoped, usan FKs tenant-aware hacia `gic.person` y `gic.organization`, RLS con `ENABLE` y `FORCE`, policies con `USING` y `WITH CHECK`, y un indice unico parcial para impedir duplicados activos. La auditoria registra `PERSON_ORGANIZATION_RELATIONSHIP_CREATED` con actor, tenant, relacion, persona, organizacion, tipo de relacion, correlacion y timestamp. No se registra RUC, nombres completos ni payload completo.
+Las tablas son tenant-scoped, usan FKs tenant-aware hacia `gic.person` y `gic.organization`, RLS con `ENABLE` y `FORCE`, policies con `USING` y `WITH CHECK`, y un indice unico parcial para impedir duplicados activos. La auditoria registra `PERSON_ORGANIZATION_RELATIONSHIP_CREATED` y `PERSON_ORGANIZATION_RELATIONSHIP_ENDED` con actor, tenant, relacion, persona, organizacion, tipo de relacion, correlacion y timestamp. No se registra RUC, nombres completos ni payload completo.
 
 Paginacion de listado:
 
@@ -325,7 +355,7 @@ Paginacion de listado:
 Limitaciones explicitas:
 
 - No hay GET individual de relacion.
-- No hay finalizacion, revocacion ni reactivacion de relaciones.
+- No hay revocacion ni reactivacion de relaciones.
 - No hay otros tipos de relacion.
 - No hay relaciones Person-Person ni Organization-Organization.
 - No hay autorizacion legal, poderes, documentos, contactos o direcciones.

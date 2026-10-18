@@ -41,4 +41,35 @@ class PersonOrganizationRelationshipTest {
                 java.time.Instant.now()))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void endsActiveRelationship() {
+        var relationship = PersonOrganizationRelationship.active(
+                TenantId.of(UUID.randomUUID()),
+                PersonId.of(UUID.randomUUID()),
+                OrganizationId.of(UUID.randomUUID()),
+                PersonOrganizationRelationshipType.REPRESENTATIVE_OF,
+                LocalDate.parse("2026-09-07"));
+
+        var ended = relationship.end(LocalDate.parse("2026-10-04"));
+
+        assertThat(ended.relationshipId()).isEqualTo(relationship.relationshipId());
+        assertThat(ended.status()).isEqualTo(PersonOrganizationRelationshipStatus.ENDED);
+        assertThat(ended.validTo()).isEqualTo(LocalDate.parse("2026-10-04"));
+        assertThat(ended.createdAt()).isEqualTo(relationship.createdAt());
+    }
+
+    @Test
+    void rejectsEndingAlreadyEndedRelationship() {
+        var ended = PersonOrganizationRelationship.active(
+                TenantId.of(UUID.randomUUID()),
+                PersonId.of(UUID.randomUUID()),
+                OrganizationId.of(UUID.randomUUID()),
+                PersonOrganizationRelationshipType.REPRESENTATIVE_OF,
+                LocalDate.parse("2026-09-07"))
+                .end(LocalDate.parse("2026-10-04"));
+
+        assertThatThrownBy(() -> ended.end(LocalDate.parse("2026-10-05")))
+                .isInstanceOf(IllegalStateException.class);
+    }
 }

@@ -5,8 +5,12 @@ import com.atlas.gic.identity.domain.PersonId;
 import com.atlas.gic.relationships.application.AssignPersonOrganizationRelationshipCommand;
 import com.atlas.gic.relationships.application.AssignPersonOrganizationRelationshipResult;
 import com.atlas.gic.relationships.application.AssignPersonOrganizationRelationshipUseCase;
+import com.atlas.gic.relationships.application.EndPersonOrganizationRelationshipCommand;
+import com.atlas.gic.relationships.application.EndPersonOrganizationRelationshipResult;
+import com.atlas.gic.relationships.application.EndPersonOrganizationRelationshipUseCase;
 import com.atlas.gic.relationships.application.GetPersonOrganizationRelationshipsUseCase;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipView;
+import com.atlas.gic.relationships.domain.PersonOrganizationRelationshipId;
 import com.atlas.gic.relationships.domain.PersonOrganizationRelationshipStatus;
 import com.atlas.gic.relationships.domain.PersonOrganizationRelationshipType;
 import jakarta.validation.Valid;
@@ -33,12 +37,15 @@ public class PersonOrganizationRelationshipController {
 
     private final AssignPersonOrganizationRelationshipUseCase assignRelationship;
     private final GetPersonOrganizationRelationshipsUseCase getRelationships;
+    private final EndPersonOrganizationRelationshipUseCase endRelationship;
 
     public PersonOrganizationRelationshipController(
             AssignPersonOrganizationRelationshipUseCase assignRelationship,
-            GetPersonOrganizationRelationshipsUseCase getRelationships) {
+            GetPersonOrganizationRelationshipsUseCase getRelationships,
+            EndPersonOrganizationRelationshipUseCase endRelationship) {
         this.assignRelationship = assignRelationship;
         this.getRelationships = getRelationships;
+        this.endRelationship = endRelationship;
     }
 
     @PostMapping
@@ -71,6 +78,20 @@ public class PersonOrganizationRelationshipController {
                 result.total()));
     }
 
+    @PostMapping("/{relationshipId}/end")
+    ResponseEntity<PersonOrganizationRelationshipEndedResponse> end(
+            @PathVariable UUID personId,
+            @PathVariable UUID relationshipId,
+            @Valid @RequestBody EndPersonOrganizationRelationshipRequest request) {
+        var result = endRelationship.end(new EndPersonOrganizationRelationshipCommand(
+                PersonId.of(personId),
+                PersonOrganizationRelationshipId.of(relationshipId),
+                request.validTo(),
+                request.correlationId()));
+
+        return ResponseEntity.ok(PersonOrganizationRelationshipEndedResponse.from(result));
+    }
+
     public record AssignPersonOrganizationRelationshipRequest(
             @NotNull UUID organizationId,
             @NotNull PersonOrganizationRelationshipType relationshipType,
@@ -90,6 +111,34 @@ public class PersonOrganizationRelationshipController {
 
         static PersonOrganizationRelationshipCreatedResponse from(AssignPersonOrganizationRelationshipResult result) {
             return new PersonOrganizationRelationshipCreatedResponse(
+                    result.relationshipId().toString(),
+                    result.personId().toString(),
+                    result.organizationId().toString(),
+                    result.relationshipType().name(),
+                    result.validFrom(),
+                    result.validTo(),
+                    result.status().name(),
+                    result.createdAt());
+        }
+    }
+
+    public record EndPersonOrganizationRelationshipRequest(
+            @NotNull LocalDate validTo,
+            @NotBlank @Size(max = 160) String correlationId) {
+    }
+
+    public record PersonOrganizationRelationshipEndedResponse(
+            String relationshipId,
+            String personId,
+            String organizationId,
+            String relationshipType,
+            LocalDate validFrom,
+            LocalDate validTo,
+            String status,
+            Instant createdAt) {
+
+        static PersonOrganizationRelationshipEndedResponse from(EndPersonOrganizationRelationshipResult result) {
+            return new PersonOrganizationRelationshipEndedResponse(
                     result.relationshipId().toString(),
                     result.personId().toString(),
                     result.organizationId().toString(),

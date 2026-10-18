@@ -12,6 +12,8 @@ import com.atlas.gic.identity.domain.PersonId;
 import com.atlas.gic.relationships.application.DuplicateActivePersonOrganizationRelationshipException;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipCreatedAudit;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipCreatedAuditEntry;
+import com.atlas.gic.relationships.application.PersonOrganizationRelationshipEndedAudit;
+import com.atlas.gic.relationships.application.PersonOrganizationRelationshipEndedAuditEntry;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipListPage;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipRepository;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipView;
@@ -70,21 +72,25 @@ class PersonOrganizationRelationshipHttpTest {
     private final MockMvc mockMvc;
     private final RecordingRelationshipRepository repository;
     private final RecordingRelationshipAudit audit;
+    private final RecordingRelationshipEndedAudit endedAudit;
 
     @Autowired
     PersonOrganizationRelationshipHttpTest(
             MockMvc mockMvc,
             RecordingRelationshipRepository repository,
-            RecordingRelationshipAudit audit) {
+            RecordingRelationshipAudit audit,
+            RecordingRelationshipEndedAudit endedAudit) {
         this.mockMvc = mockMvc;
         this.repository = repository;
         this.audit = audit;
+        this.endedAudit = endedAudit;
     }
 
     @BeforeEach
     void reset() {
         repository.clear();
         audit.clear();
+        endedAudit.clear();
     }
 
     @Test
@@ -230,6 +236,76 @@ class PersonOrganizationRelationshipHttpTest {
     }
 
     @Test
+    void endsActiveRelationship() throws Exception {
+        repository.personExists = true;
+        repository.relationship = activeRelationship();
+
+        mockMvc.perform(post("/api/v1/persons/{personId}/organization-relationships/{relationshipId}/end",
+                        PERSON_ID,
+                        repository.relationship.relationshipId().value())
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "validTo": "2026-10-04",
+                                  "correlationId": "corr-rel-end-http"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Location"))
+                .andExpect(jsonPath("$.relationshipId").value(repository.relationship.relationshipId().toString()))
+                .andExpect(jsonPath("$.status").value("ENDED"))
+                .andExpect(jsonPath("$.validTo").value("2026-10-04"))
+                .andExpect(jsonPath("$.tenantId").doesNotExist());
+
+        assertThat(repository.ended).isNotNull();
+        assertThat(repository.ended.status()).isEqualTo(PersonOrganizationRelationshipStatus.ENDED);
+        assertThat(endedAudit.entries).singleElement()
+                .satisfies(entry -> {
+                    assertThat(entry.actor()).isEqualTo("tenant-user");
+                    assertThat(entry.correlationId()).isEqualTo("corr-rel-end-http");
+                    assertThat(entry.relationshipId()).isEqualTo(repository.relationship.relationshipId());
+                });
+    }
+
+    @Test
+    void returnsConflictWhenRelationshipIsAlreadyEnded() throws Exception {
+        repository.personExists = true;
+        repository.relationship = activeRelationship().end(LocalDate.parse("2026-10-04"));
+
+        mockMvc.perform(post("/api/v1/persons/{personId}/organization-relationships/{relationshipId}/end",
+                        PERSON_ID,
+                        repository.relationship.relationshipId().value())
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(endPayload()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Relationship lifecycle conflict"));
+    }
+
+    @Test
+    void returnsBadRequestForInvalidEndPayload() throws Exception {
+        repository.personExists = true;
+        repository.relationship = activeRelationship();
+
+        mockMvc.perform(post("/api/v1/persons/{personId}/organization-relationships/{relationshipId}/end",
+                        PERSON_ID,
+                        repository.relationship.relationshipId().value())
+                        .with(user("tenant-user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "validTo": null,
+                                  "correlationId": "corr-rel-end-http"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void tenantIdInBodyDoesNotGrantAuthority() throws Exception {
         repository.personExists = true;
         repository.organizationExists = true;
@@ -265,6 +341,51 @@ class PersonOrganizationRelationshipHttpTest {
                 """.formatted(ORGANIZATION_ID);
     }
 
+    private String endPayload() {
+        return """
+                {
+                  "validTo": "2026-10-04",
+                  "correlationId": "corr-rel-end-http"
+                }
+                """;
+    }
+
+    @Test
+    void endEndpointProtectsAuthenticationTenantAndResourceVisibility() throws Exception {
+        var route = "/api/v1/persons/" + PERSON_ID + "/organization-relationships/" + UUID.randomUUID() + "/end";
+        mockMvc.perform(post(route).with(anonymous()).contentType(MediaType.APPLICATION_JSON).content(endPayload()))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post(route).with(user("user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_B).contentType(MediaType.APPLICATION_JSON).content(endPayload()))
+                .andExpect(status().isForbidden());
+        repository.personExists = true;
+        mockMvc.perform(post(route).with(user("user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A).contentType(MediaType.APPLICATION_JSON).content(endPayload()))
+                .andExpect(status().isNotFound());
+        assertThat(endedAudit.entries).isEmpty();
+    }
+
+    @Test
+    void endEndpointRejectsFutureDatesInvalidUuidsAndControlCharacters() throws Exception {
+        repository.personExists = true;
+        repository.relationship = activeRelationship();
+        var route = "/api/v1/persons/" + PERSON_ID + "/organization-relationships/"
+                + repository.relationship.relationshipId() + "/end";
+        for (var payload : List.of(
+                "{\"validTo\":\"9999-12-31\",\"correlationId\":\"future\"}",
+                "{\"validTo\":\"2026-09-06\",\"correlationId\":\"invalid-period\"}",
+                "{\"validTo\":\"2026-10-04\",\"correlationId\":\"line\\nfeed\"}")) {
+            mockMvc.perform(post(route).with(user("user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                            .header("X-Tenant-Id", TENANT_A).contentType(MediaType.APPLICATION_JSON).content(payload))
+                    .andExpect(status().isBadRequest());
+        }
+        mockMvc.perform(post("/api/v1/persons/not-a-uuid/organization-relationships/not-a-uuid/end")
+                        .with(user("user").authorities(new SimpleGrantedAuthority("TENANT_" + TENANT_A)))
+                        .header("X-Tenant-Id", TENANT_A).contentType(MediaType.APPLICATION_JSON).content(endPayload()))
+                .andExpect(status().isBadRequest());
+        assertThat(endedAudit.entries).isEmpty();
+    }
+
     @TestConfiguration
     static class HttpTestConfiguration {
 
@@ -278,6 +399,12 @@ class PersonOrganizationRelationshipHttpTest {
         @Primary
         RecordingRelationshipAudit recordingRelationshipAudit() {
             return new RecordingRelationshipAudit();
+        }
+
+        @Bean
+        @Primary
+        RecordingRelationshipEndedAudit recordingRelationshipEndedAudit() {
+            return new RecordingRelationshipEndedAudit();
         }
 
         @Bean
@@ -411,6 +538,8 @@ class PersonOrganizationRelationshipHttpTest {
         private boolean personExists;
         private boolean organizationExists;
         private boolean duplicate;
+        private PersonOrganizationRelationship relationship;
+        private PersonOrganizationRelationship ended;
         private PersonOrganizationRelationshipListPage page =
                 new PersonOrganizationRelationshipListPage(List.of(), 0, 20, 0);
         private final List<PersonOrganizationRelationship> saved = new ArrayList<>();
@@ -443,10 +572,34 @@ class PersonOrganizationRelationshipHttpTest {
             return this.page;
         }
 
+        @Override
+        public Optional<PersonOrganizationRelationship> findById(
+                TenantId tenantId,
+                PersonId personId,
+                com.atlas.gic.relationships.domain.PersonOrganizationRelationshipId relationshipId) {
+            return Optional.ofNullable(relationship)
+                    .filter(value -> value.relationshipId().equals(relationshipId));
+        }
+
+        @Override
+        public boolean endActive(
+                TenantId tenantId,
+                PersonId personId,
+                PersonOrganizationRelationship endedRelationship) {
+            if (relationship == null || relationship.status() != PersonOrganizationRelationshipStatus.ACTIVE) {
+                return false;
+            }
+            ended = endedRelationship;
+            relationship = endedRelationship;
+            return true;
+        }
+
         void clear() {
             personExists = false;
             organizationExists = false;
             duplicate = false;
+            relationship = null;
+            ended = null;
             page = new PersonOrganizationRelationshipListPage(List.of(), 0, 20, 0);
             saved.clear();
         }
@@ -464,5 +617,28 @@ class PersonOrganizationRelationshipHttpTest {
         void clear() {
             entries.clear();
         }
+    }
+
+    static class RecordingRelationshipEndedAudit implements PersonOrganizationRelationshipEndedAudit {
+
+        private final List<PersonOrganizationRelationshipEndedAuditEntry> entries = new ArrayList<>();
+
+        @Override
+        public void record(PersonOrganizationRelationshipEndedAuditEntry entry) {
+            entries.add(entry);
+        }
+
+        void clear() {
+            entries.clear();
+        }
+    }
+
+    private static PersonOrganizationRelationship activeRelationship() {
+        return PersonOrganizationRelationship.active(
+                TenantId.of(UUID.fromString(TENANT_A)),
+                PersonId.of(UUID.fromString(PERSON_ID)),
+                OrganizationId.of(UUID.fromString(ORGANIZATION_ID)),
+                PersonOrganizationRelationshipType.REPRESENTATIVE_OF,
+                LocalDate.parse("2026-09-07"));
     }
 }
