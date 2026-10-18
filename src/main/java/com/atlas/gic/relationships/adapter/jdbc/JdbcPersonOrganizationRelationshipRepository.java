@@ -7,6 +7,7 @@ import com.atlas.gic.relationships.application.PersonOrganizationRelationshipLis
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipRepository;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipView;
 import com.atlas.gic.relationships.domain.PersonOrganizationRelationship;
+import com.atlas.gic.relationships.domain.PersonOrganizationRelationshipId;
 import com.atlas.gic.relationships.domain.PersonOrganizationRelationshipStatus;
 import com.atlas.gic.relationships.domain.PersonOrganizationRelationshipType;
 import com.atlas.gic.shared.tenancy.domain.TenantId;
@@ -19,6 +20,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -92,6 +94,49 @@ public class JdbcPersonOrganizationRelationshipRepository implements PersonOrgan
     }
 
     @Override
+    public Optional<PersonOrganizationRelationship> findById(
+            TenantId tenantId,
+            PersonId personId,
+            PersonOrganizationRelationshipId relationshipId) {
+        setCurrentTenant(tenantId);
+        return jdbcTemplate.query("""
+                SELECT relationship_id, tenant_id, person_id, organization_id,
+                       relationship_type, valid_from, valid_to, status, created_at
+                FROM gic.person_organization_relationship
+                WHERE tenant_id = ?
+                  AND person_id = ?
+                  AND relationship_id = ?
+                """,
+                ps -> {
+                    ps.setObject(1, tenantId.value(), Types.OTHER);
+                    ps.setObject(2, personId.value(), Types.OTHER);
+                    ps.setObject(3, relationshipId.value(), Types.OTHER);
+                },
+                rs -> rs.next() ? Optional.of(mapRelationship(rs)) : Optional.empty());
+    }
+
+    @Override
+    public boolean endActive(TenantId tenantId, PersonId personId, PersonOrganizationRelationship endedRelationship) {
+        setCurrentTenant(tenantId);
+        var updated = jdbcTemplate.update("""
+                UPDATE gic.person_organization_relationship
+                SET status = 'ENDED',
+                    valid_to = ?
+                WHERE tenant_id = ?
+                  AND person_id = ?
+                  AND relationship_id = ?
+                  AND status = 'ACTIVE'
+                """,
+                ps -> {
+                    ps.setObject(1, endedRelationship.validTo());
+                    ps.setObject(2, tenantId.value(), Types.OTHER);
+                    ps.setObject(3, personId.value(), Types.OTHER);
+                    ps.setObject(4, endedRelationship.relationshipId().value(), Types.OTHER);
+                });
+        return updated == 1;
+    }
+
+    @Override
     public PersonOrganizationRelationshipListPage findByPerson(
             TenantId tenantId,
             PersonId personId,
@@ -161,6 +206,19 @@ public class JdbcPersonOrganizationRelationshipRepository implements PersonOrgan
                 rs.getObject("organization_id", UUID.class),
                 rs.getString("legal_name"),
                 rs.getString("trade_name"),
+                PersonOrganizationRelationshipType.valueOf(rs.getString("relationship_type")),
+                rs.getObject("valid_from", java.time.LocalDate.class),
+                rs.getObject("valid_to", java.time.LocalDate.class),
+                PersonOrganizationRelationshipStatus.valueOf(rs.getString("status")),
+                rs.getTimestamp("created_at").toInstant());
+    }
+
+    private PersonOrganizationRelationship mapRelationship(ResultSet rs) throws SQLException {
+        return new PersonOrganizationRelationship(
+                PersonOrganizationRelationshipId.of(rs.getObject("relationship_id", UUID.class)),
+                TenantId.of(rs.getObject("tenant_id", UUID.class)),
+                PersonId.of(rs.getObject("person_id", UUID.class)),
+                OrganizationId.of(rs.getObject("organization_id", UUID.class)),
                 PersonOrganizationRelationshipType.valueOf(rs.getString("relationship_type")),
                 rs.getObject("valid_from", java.time.LocalDate.class),
                 rs.getObject("valid_to", java.time.LocalDate.class),

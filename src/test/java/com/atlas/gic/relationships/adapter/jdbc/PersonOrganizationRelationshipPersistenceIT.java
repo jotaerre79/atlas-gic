@@ -7,9 +7,14 @@ import com.atlas.gic.identity.domain.PersonId;
 import com.atlas.gic.relationships.application.AssignPersonOrganizationRelationshipCommand;
 import com.atlas.gic.relationships.application.AssignPersonOrganizationRelationshipUseCase;
 import com.atlas.gic.relationships.application.DuplicateActivePersonOrganizationRelationshipException;
+import com.atlas.gic.relationships.application.EndPersonOrganizationRelationshipCommand;
+import com.atlas.gic.relationships.application.EndPersonOrganizationRelationshipUseCase;
 import com.atlas.gic.relationships.application.GetPersonOrganizationRelationshipsUseCase;
+import com.atlas.gic.relationships.application.PersonOrganizationRelationshipAlreadyEndedException;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipCreatedAudit;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipCreatedAuditEntry;
+import com.atlas.gic.relationships.application.PersonOrganizationRelationshipEndedAudit;
+import com.atlas.gic.relationships.application.PersonOrganizationRelationshipEndedAuditEntry;
 import com.atlas.gic.relationships.domain.PersonOrganizationRelationshipStatus;
 import com.atlas.gic.relationships.domain.PersonOrganizationRelationshipType;
 import com.atlas.gic.shared.tenancy.application.TenantContext;
@@ -53,6 +58,7 @@ class PersonOrganizationRelationshipPersistenceIT {
         Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration")
+                .target("6")
                 .load()
                 .migrate();
 
@@ -79,6 +85,21 @@ class PersonOrganizationRelationshipPersistenceIT {
             insertOrganization(statement, tenantB, organizationB, "Organizacion B", "Org B", "802222222");
             statement.execute("RESET atlas.platform_access");
         }
+        var dataSource = appDataSource();
+        var jdbc = new JdbcTemplate(dataSource);
+        var tx = transactionTemplate(dataSource);
+        var upgradePerson = seedPerson(UUID.randomUUID(), tenantA, "Upgrade", "V6");
+        var upgradeOrg = seedOrganization(UUID.randomUUID(), tenantA, "Upgrade SA", "Upgrade", uniqueRuc());
+        var beforeUpgrade = tx.execute(s -> assignUseCase(tenantA, jdbc)
+                .assign(command(upgradePerson, upgradeOrg, "upgrade-" + UUID.randomUUID())));
+        Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:db/migration").load().migrate();
+        tx.executeWithoutResult(s -> {
+            var stored = new JdbcPersonOrganizationRelationshipRepository(jdbc)
+                    .findById(tenantA, upgradePerson, beforeUpgrade.relationshipId()).orElseThrow();
+            assertThat(stored.status()).isEqualTo(PersonOrganizationRelationshipStatus.ACTIVE);
+            assertThat(stored.validTo()).isNull();
+        });
     }
 
     @Test
@@ -308,11 +329,265 @@ class PersonOrganizationRelationshipPersistenceIT {
         }
     }
 
+    @Test
+    void endRelationshipPersistsLifecycleStateAndAuditTrail() {
+        var dataSource = appDataSource();
+        var jdbcTemplate = new JdbcTemplate(dataSource);
+        var transactionTemplate = transactionTemplate(dataSource);
+        var uniquePerson = seedPerson(UUID.randomUUID(), tenantA, "End", "Relationship");
+        var uniqueOrganization = seedOrganization(UUID.randomUUID(), tenantA, "End Relationship SA", "End", uniqueRuc());
+        var assigned = transactionTemplate.execute(status ->
+                assignUseCase(tenantA, jdbcTemplate).assign(command(uniquePerson, uniqueOrganization, "corr-rel-end-created")));
+        var endUseCase = endUseCase(tenantA, jdbcTemplate);
+
+        var ended = transactionTemplate.execute(status -> endUseCase.end(new EndPersonOrganizationRelationshipCommand(
+                uniquePerson,
+                assigned.relationshipId(),
+                LocalDate.parse("2026-10-04"),
+                "corr-rel-ended")));
+
+        assertThat(ended).isNotNull();
+        assertThat(ended.status()).isEqualTo(PersonOrganizationRelationshipStatus.ENDED);
+        assertThat(ended.validTo()).isEqualTo(LocalDate.parse("2026-10-04"));
+        transactionTemplate.executeWithoutResult(status -> {
+            setCurrentTenant(jdbcTemplate, tenantA);
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT count(*)
+                    FROM gic.person_organization_relationship
+                    WHERE relationship_id = ?
+                      AND status = 'ENDED'
+                      AND valid_to = '2026-10-04'
+                    """,
+                    Integer.class,
+                    assigned.relationshipId().value())).isEqualTo(1);
+            assertThat(endedAuditRows(jdbcTemplate, assigned.relationshipId().value(), "corr-rel-ended")).isEqualTo(1);
+        });
+    }
+
+    @Test
+    void endingRelationshipTwiceMapsToConflictAndWritesSingleEndedAudit() {
+        var dataSource = appDataSource();
+        var jdbcTemplate = new JdbcTemplate(dataSource);
+        var transactionTemplate = transactionTemplate(dataSource);
+        var uniquePerson = seedPerson(UUID.randomUUID(), tenantA, "Double", "End");
+        var uniqueOrganization = seedOrganization(UUID.randomUUID(), tenantA, "Double End SA", "Double", uniqueRuc());
+        var assigned = transactionTemplate.execute(status ->
+                assignUseCase(tenantA, jdbcTemplate).assign(command(uniquePerson, uniqueOrganization, "corr-rel-double-created")));
+        var endUseCase = endUseCase(tenantA, jdbcTemplate);
+
+        transactionTemplate.executeWithoutResult(status -> endUseCase.end(new EndPersonOrganizationRelationshipCommand(
+                uniquePerson,
+                assigned.relationshipId(),
+                LocalDate.parse("2026-10-04"),
+                "corr-rel-double-ended")));
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> endUseCase.end(
+                new EndPersonOrganizationRelationshipCommand(
+                        uniquePerson,
+                        assigned.relationshipId(),
+                        LocalDate.parse("2026-10-05"),
+                        "corr-rel-double-ended-again"))))
+                .isInstanceOf(PersonOrganizationRelationshipAlreadyEndedException.class);
+
+        transactionTemplate.executeWithoutResult(status -> {
+            setCurrentTenant(jdbcTemplate, tenantA);
+            assertThat(endedAuditRows(jdbcTemplate, assigned.relationshipId().value(), "corr-rel-double-ended"))
+                    .isEqualTo(1);
+            assertThat(endedAuditRows(jdbcTemplate, assigned.relationshipId().value(), "corr-rel-double-ended-again"))
+                    .isZero();
+        });
+    }
+
+    @Test
+    void auditFailureRollsBackRelationshipEnd() {
+        var dataSource = appDataSource();
+        var jdbcTemplate = new JdbcTemplate(dataSource);
+        var transactionTemplate = transactionTemplate(dataSource);
+        var uniquePerson = seedPerson(UUID.randomUUID(), tenantA, "EndAudit", "Rollback");
+        var uniqueOrganization = seedOrganization(UUID.randomUUID(), tenantA, "End Audit Rollback SA", "EndAudit", uniqueRuc());
+        var assigned = transactionTemplate.execute(status ->
+                assignUseCase(tenantA, jdbcTemplate).assign(command(uniquePerson, uniqueOrganization, "corr-rel-end-audit-created")));
+        var endUseCase = new EndPersonOrganizationRelationshipUseCase(
+                new FixedTenantContext(tenantA),
+                new JdbcPersonOrganizationRelationshipRepository(jdbcTemplate),
+                entry -> new JdbcPersonOrganizationRelationshipEndedAudit(jdbcTemplate).record(
+                        new PersonOrganizationRelationshipEndedAuditEntry("x".repeat(161), entry.tenantId(),
+                                entry.relationshipId(), entry.personId(), entry.organizationId(),
+                                entry.relationshipType(), entry.correlationId(), entry.timestamp())),
+                () -> "relationships-it");
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> endUseCase.end(
+                new EndPersonOrganizationRelationshipCommand(
+                        uniquePerson,
+                        assigned.relationshipId(),
+                        LocalDate.parse("2026-10-04"),
+                        "corr-rel-end-audit-failing"))))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+
+        transactionTemplate.executeWithoutResult(status -> {
+            setCurrentTenant(jdbcTemplate, tenantA);
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT count(*)
+                    FROM gic.person_organization_relationship
+                    WHERE relationship_id = ?
+                      AND status = 'ACTIVE'
+                      AND valid_to IS NULL
+                    """,
+                    Integer.class,
+                    assigned.relationshipId().value())).isEqualTo(1);
+            assertThat(endedAuditRows(jdbcTemplate, assigned.relationshipId().value(), "corr-rel-end-audit-failing"))
+                    .isZero();
+        });
+        var retry = transactionTemplate.execute(s -> endUseCase(tenantA, jdbcTemplate).end(
+                new EndPersonOrganizationRelationshipCommand(uniquePerson, assigned.relationshipId(),
+                        LocalDate.parse("2026-10-04"), "retry-" + UUID.randomUUID())));
+        assertThat(retry.status()).isEqualTo(PersonOrganizationRelationshipStatus.ENDED);
+    }
+
+    @Test
+    void newActiveRelationshipIsAllowedAfterPreviousRelationshipEnds() {
+        var dataSource = appDataSource();
+        var jdbcTemplate = new JdbcTemplate(dataSource);
+        var transactionTemplate = transactionTemplate(dataSource);
+        var uniquePerson = seedPerson(UUID.randomUUID(), tenantA, "Renew", "Relationship");
+        var uniqueOrganization = seedOrganization(UUID.randomUUID(), tenantA, "Renew Relationship SA", "Renew", uniqueRuc());
+        var assignUseCase = assignUseCase(tenantA, jdbcTemplate);
+        var first = transactionTemplate.execute(status ->
+                assignUseCase.assign(command(uniquePerson, uniqueOrganization, "corr-rel-renew-first")));
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(s ->
+                assignUseCase.assign(command(uniquePerson, uniqueOrganization, "duplicate-" + UUID.randomUUID()))))
+                .isInstanceOf(DuplicateActivePersonOrganizationRelationshipException.class);
+        transactionTemplate.executeWithoutResult(status -> endUseCase(tenantA, jdbcTemplate).end(
+                new EndPersonOrganizationRelationshipCommand(
+                        uniquePerson,
+                        first.relationshipId(),
+                        LocalDate.parse("2026-10-04"),
+                        "corr-rel-renew-ended")));
+
+        var second = transactionTemplate.execute(status ->
+                assignUseCase.assign(command(uniquePerson, uniqueOrganization, "corr-rel-renew-second")));
+
+        assertThat(second).isNotNull();
+        assertThat(second.relationshipId()).isNotEqualTo(first.relationshipId());
+        var activePage = transactionTemplate.execute(s -> new GetPersonOrganizationRelationshipsUseCase(
+                new FixedTenantContext(tenantA), new JdbcPersonOrganizationRelationshipRepository(jdbcTemplate))
+                .get(uniquePerson, 0, 20, PersonOrganizationRelationshipStatus.ACTIVE));
+        assertThat(activePage.items()).singleElement()
+                .satisfies(item -> assertThat(item.relationshipId()).isEqualTo(second.relationshipId().value()));
+        transactionTemplate.executeWithoutResult(status -> {
+            setCurrentTenant(jdbcTemplate, tenantA);
+            assertThat(auditRows(jdbcTemplate, first.relationshipId().value(), "corr-rel-renew-first")).isEqualTo(1);
+            assertThat(endedAuditRows(jdbcTemplate, first.relationshipId().value(), "corr-rel-renew-ended")).isEqualTo(1);
+            assertThat(auditRows(jdbcTemplate, second.relationshipId().value(), "corr-rel-renew-second")).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT count(*)
+                    FROM gic.person_organization_relationship
+                    WHERE person_id = ?
+                      AND organization_id = ?
+                      AND status = 'ENDED'
+                    """,
+                    Integer.class,
+                    uniquePerson.value(),
+                    uniqueOrganization.value())).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT count(*)
+                    FROM gic.person_organization_relationship
+                    WHERE person_id = ?
+                      AND organization_id = ?
+                      AND status = 'ACTIVE'
+                    """,
+                    Integer.class,
+                    uniquePerson.value(),
+                    uniqueOrganization.value())).isEqualTo(1);
+        });
+    }
+
+    @Test
+    void endingInvisibleOrWrongPersonRelationshipDoesNotRevealCrossTenantResource() {
+        var dataSource = appDataSource();
+        var jdbcTemplate = new JdbcTemplate(dataSource);
+        var transactionTemplate = transactionTemplate(dataSource);
+        var relationshipB = transactionTemplate.execute(status ->
+                assignUseCase(tenantB, jdbcTemplate).assign(command(personB, organizationB, "corr-rel-tenant-b-created")));
+        var endUseCaseA = endUseCase(tenantA, jdbcTemplate);
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> endUseCaseA.end(
+                new EndPersonOrganizationRelationshipCommand(
+                        personA,
+                        relationshipB.relationshipId(),
+                        LocalDate.parse("2026-10-04"),
+                        "corr-rel-cross-end"))))
+                .isInstanceOf(PersonNotFoundException.class);
+    }
+
     private static AssignPersonOrganizationRelationshipUseCase assignUseCase(TenantId tenantId, JdbcTemplate jdbcTemplate) {
         return new AssignPersonOrganizationRelationshipUseCase(
                 new FixedTenantContext(tenantId),
                 new JdbcPersonOrganizationRelationshipRepository(jdbcTemplate),
                 new JdbcPersonOrganizationRelationshipCreatedAudit(jdbcTemplate),
+                () -> "relationships-it");
+    }
+
+    @Test
+    void concurrentEndsCommitExactlyOneAudit() throws Exception {
+        var dataSource = appDataSource();
+        var jdbc = new JdbcTemplate(dataSource);
+        var tx = transactionTemplate(dataSource);
+        var person = seedPerson(UUID.randomUUID(), tenantA, "Concurrent", "End");
+        var org = seedOrganization(UUID.randomUUID(), tenantA, "Concurrent SA", "Concurrent", uniqueRuc());
+        var assigned = tx.execute(s -> assignUseCase(tenantA, jdbc).assign(command(person, org, "create-" + UUID.randomUUID())));
+        var barrier = new java.util.concurrent.CyclicBarrier(2);
+        var correlation = "concurrent-" + UUID.randomUUID();
+        var repository = new JdbcPersonOrganizationRelationshipRepository(jdbc) {
+            @Override
+            public Optional<com.atlas.gic.relationships.domain.PersonOrganizationRelationship> findById(
+                    TenantId tenant, PersonId personId,
+                    com.atlas.gic.relationships.domain.PersonOrganizationRelationshipId id) {
+                var result = super.findById(tenant, personId, id);
+                try {
+                    barrier.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (Exception error) {
+                    throw new IllegalStateException("concurrent read barrier failed", error);
+                }
+                return result;
+            }
+        };
+        var useCase = new EndPersonOrganizationRelationshipUseCase(new FixedTenantContext(tenantA), repository,
+                new JdbcPersonOrganizationRelationshipEndedAudit(jdbc), () -> "relationships-it");
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Callable<Boolean> end = () -> {
+                try {
+                    tx.executeWithoutResult(s -> useCase.end(new EndPersonOrganizationRelationshipCommand(
+                            person, assigned.relationshipId(), LocalDate.parse("2026-10-04"), correlation)));
+                    return true;
+                } catch (PersonOrganizationRelationshipAlreadyEndedException expected) {
+                    return false;
+                }
+            };
+            var first = executor.submit(end);
+            var second = executor.submit(end);
+            assertThat(java.util.List.of(first.get(20, java.util.concurrent.TimeUnit.SECONDS),
+                    second.get(20, java.util.concurrent.TimeUnit.SECONDS))).containsExactlyInAnyOrder(true, false);
+        } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        }
+        tx.executeWithoutResult(s -> {
+            setCurrentTenant(jdbc, tenantA);
+            var stored = new JdbcPersonOrganizationRelationshipRepository(jdbc)
+                    .findById(tenantA, person, assigned.relationshipId()).orElseThrow();
+            assertThat(stored.status()).isEqualTo(PersonOrganizationRelationshipStatus.ENDED);
+            assertThat(stored.validTo()).isEqualTo(LocalDate.parse("2026-10-04"));
+            assertThat(endedAuditRows(jdbc, assigned.relationshipId().value(), correlation)).isEqualTo(1);
+        });
+    }
+
+    private static EndPersonOrganizationRelationshipUseCase endUseCase(TenantId tenantId, JdbcTemplate jdbcTemplate) {
+        return new EndPersonOrganizationRelationshipUseCase(
+                new FixedTenantContext(tenantId),
+                new JdbcPersonOrganizationRelationshipRepository(jdbcTemplate),
+                new JdbcPersonOrganizationRelationshipEndedAudit(jdbcTemplate),
                 () -> "relationships-it");
     }
 
@@ -362,6 +637,22 @@ class PersonOrganizationRelationshipPersistenceIT {
                 SELECT count(*)
                 FROM gic.person_organization_relationship_audit
                 WHERE action = 'PERSON_ORGANIZATION_RELATIONSHIP_CREATED'
+                  AND actor = 'relationships-it'
+                  AND relationship_id = ?
+                  AND relationship_type = 'REPRESENTATIVE_OF'
+                  AND correlation_id = ?
+                """,
+                Integer.class,
+                relationshipId,
+                correlationId);
+    }
+
+    private static int endedAuditRows(JdbcTemplate jdbcTemplate, UUID relationshipId, String correlationId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT count(*)
+                FROM gic.person_organization_relationship_audit
+                WHERE action = 'PERSON_ORGANIZATION_RELATIONSHIP_ENDED'
+                  AND tenant_id = nullif(current_setting('atlas.current_tenant', true), '')::uuid
                   AND actor = 'relationships-it'
                   AND relationship_id = ?
                   AND relationship_type = 'REPRESENTATIVE_OF'
@@ -462,5 +753,43 @@ class PersonOrganizationRelationshipPersistenceIT {
         public void record(PersonOrganizationRelationshipCreatedAuditEntry entry) {
             throw new IllegalStateException("audit unavailable");
         }
+    }
+
+    @Test
+    void lifecycleRlsIsForcedForNonOwnerAndTenantContextDoesNotLeak() {
+        var ds = appDataSource();
+        var jdbc = new JdbcTemplate(ds);
+        var tx = transactionTemplate(ds);
+        var person = seedPerson(UUID.randomUUID(), tenantA, "Isolation", "Lifecycle");
+        var otherPerson = seedPerson(UUID.randomUUID(), tenantA, "Wrong", "Person");
+        var org = seedOrganization(UUID.randomUUID(), tenantA, "Isolated SA", "Isolated", uniqueRuc());
+        var correlation = "isolation-" + UUID.randomUUID();
+        var relation = tx.execute(s -> assignUseCase(tenantA, jdbc).assign(command(person, org, correlation)));
+        assertThat(jdbc.queryForObject("SELECT current_user", String.class)).isEqualTo(APP_USER);
+        assertThat(jdbc.queryForObject("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user", Boolean.class)).isFalse();
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname='gic' AND c.relname IN ('person_organization_relationship','person_organization_relationship_audit')
+                  AND c.relrowsecurity AND c.relforcerowsecurity AND c.relowner <> (SELECT oid FROM pg_roles WHERE rolname=current_user)
+                """, Integer.class)).isEqualTo(2);
+        assertThatThrownBy(() -> tx.executeWithoutResult(s -> endUseCase(tenantA, jdbc).end(
+                new EndPersonOrganizationRelationshipCommand(otherPerson, relation.relationshipId(),
+                        LocalDate.parse("2026-10-04"), correlation))))
+                .isInstanceOf(PersonNotFoundException.class);
+        tx.executeWithoutResult(s -> {
+            setCurrentTenant(jdbc, tenantB);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM gic.person_organization_relationship WHERE relationship_id=?",
+                    Integer.class, relation.relationshipId().value())).isZero();
+            assertThat(jdbc.update("UPDATE gic.person_organization_relationship SET status='ENDED',valid_to=? WHERE relationship_id=?",
+                    LocalDate.parse("2026-10-04"), relation.relationshipId().value())).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM gic.person_organization_relationship_audit WHERE relationship_id=?",
+                    Integer.class, relation.relationshipId().value())).isZero();
+        });
+        tx.executeWithoutResult(s -> {
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM gic.person_organization_relationship WHERE relationship_id=?",
+                    Integer.class, relation.relationshipId().value())).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM gic.person_organization_relationship_audit WHERE relationship_id=?",
+                    Integer.class, relation.relationshipId().value())).isZero();
+        });
     }
 }

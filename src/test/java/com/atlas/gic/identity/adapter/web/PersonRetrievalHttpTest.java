@@ -17,6 +17,7 @@ import com.atlas.gic.roles.domain.BusinessRoleAssignmentId;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipCreatedAudit;
 import com.atlas.gic.relationships.application.PersonOrganizationRelationshipRepository;
 import com.atlas.gic.relationships.support.NoopPersonOrganizationRelationshipCreatedAudit;
+import com.atlas.gic.relationships.support.NoopPersonOrganizationRelationshipEndedAudit;
 import com.atlas.gic.relationships.support.NoopPersonOrganizationRelationshipRepository;
 import com.atlas.gic.shared.tenancy.domain.TenantId;
 import org.junit.jupiter.api.BeforeEach;
@@ -300,6 +301,12 @@ class PersonRetrievalHttpTest {
         @Primary
         PersonOrganizationRelationshipCreatedAudit personOrganizationRelationshipCreatedAudit() {
             return new NoopPersonOrganizationRelationshipCreatedAudit();
+        }
+
+        @Bean
+        @Primary
+        com.atlas.gic.relationships.application.PersonOrganizationRelationshipEndedAudit personOrganizationRelationshipEndedAudit() {
+            return new NoopPersonOrganizationRelationshipEndedAudit();
         }
     }
 

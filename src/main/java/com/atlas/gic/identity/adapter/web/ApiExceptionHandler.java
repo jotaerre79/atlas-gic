@@ -8,6 +8,7 @@ import com.atlas.gic.identity.application.TenantContextRequiredException;
 import com.atlas.gic.roles.application.BusinessRoleAlreadyEndedException;
 import com.atlas.gic.roles.application.DuplicateActiveBusinessRoleException;
 import com.atlas.gic.relationships.application.DuplicateActivePersonOrganizationRelationshipException;
+import com.atlas.gic.relationships.application.PersonOrganizationRelationshipAlreadyEndedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -75,6 +76,14 @@ public class ApiExceptionHandler {
         var problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
         problem.setTitle("Relationship conflict");
         problem.setDetail("The person already has an active relationship with this organization for the same type");
+        return problem;
+    }
+
+    @ExceptionHandler(PersonOrganizationRelationshipAlreadyEndedException.class)
+    ProblemDetail personOrganizationRelationshipAlreadyEnded(PersonOrganizationRelationshipAlreadyEndedException exception) {
+        var problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setTitle("Relationship lifecycle conflict");
+        problem.setDetail("The person-organization relationship is not active");
         return problem;
     }
 

@@ -39,6 +39,9 @@ public class GetPersonOrganizationRelationshipsUseCase {
         if (status == null) {
             throw new IllegalArgumentException("status is required");
         }
+        if (status != PersonOrganizationRelationshipStatus.ACTIVE) {
+            throw new IllegalArgumentException("only ACTIVE status is supported");
+        }
 
         var tenantId = tenantContext.currentTenant().orElseThrow(TenantContextRequiredException::new);
         if (!repository.personExists(tenantId, personId)) {
